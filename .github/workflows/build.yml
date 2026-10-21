@@ -268,6 +268,16 @@ jobs:
           $audioChecks = '(?s)\s*if \(recordSystemAudio && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.OutputDevices\).*?\n            \}\s*if \(recordMicrophone && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.InputDevices\).*?\n            \}'
           $main = [regex]::Replace($main, $audioChecks, '')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
+      - name: Inspect UI controls and recording timer code
+        shell: pwsh
+        run: |
+          $root = Split-Path $env:PROJECT_FILE
+          $mainPath = Join-Path $root 'MainWindow.xaml.cs'
+          $xamlPath = Join-Path $root 'MainWindow.xaml'
+          Write-Host '===== UI CONTROL NAMES ====='
+          Select-String -LiteralPath $xamlPath -Pattern 'x:Name=|Click=|Loaded=|Closing=' | ForEach-Object { Write-Host $_.Line.Trim() }
+          Write-Host '===== TIMER/STATUS/RECORDING METHOD REFERENCES ====='
+          Select-String -LiteralPath $mainPath -Pattern 'UpdateRecordingClock|SetStatus\(|StatusDot|StatusText|TimeText|TimerText|Elapsed|StopRecordingAsync|ToggleRecording|RecordButton\.(Content|IsEnabled)|private async Task|private void' -Context 1,5 | ForEach-Object { Write-Host $_ }
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
