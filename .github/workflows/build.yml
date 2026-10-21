@@ -66,110 +66,110 @@ jobs:
           if ($lineStart -lt 0) { $lineStart = 0 } else { $lineStart++ }
           $indent = [regex]::Match($main.Substring($lineStart, $recordMatch.Index - $lineStart), '^\s*').Value
           $hooks = @"
-${indent}if (selectedRegion.HasValue)
-${indent}{
-${indent}    _regionOutlineWindow = new RegionOutlineWindow(selectedRegion.Value);
-${indent}    _regionOutlineWindow.Show();
-${indent}}
-${indent}$recordObject.OnRecordingComplete += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
-${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
-"@
+          ${indent}if (selectedRegion.HasValue)
+          ${indent}{
+          ${indent}    _regionOutlineWindow = new RegionOutlineWindow(selectedRegion.Value);
+          ${indent}    _regionOutlineWindow.Show();
+          ${indent}}
+          ${indent}$recordObject.OnRecordingComplete += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
+          ${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
+          "@
           $main = $main.Insert($lineStart, $hooks + "`r`n")
           $closeMethod = @'
-    private void CloseRegionOutline()
-    {
-        if (_regionOutlineWindow == null) return;
-        _regionOutlineWindow.Close();
-        _regionOutlineWindow = null;
-    }
-
-'@
+              private void CloseRegionOutline()
+              {
+                  if (_regionOutlineWindow == null) return;
+                  _regionOutlineWindow.Close();
+                  _regionOutlineWindow = null;
+              }
+          
+          '@
           $lastBrace = $main.LastIndexOf('}')
           if ($lastBrace -lt 0) { throw 'Could not find end of MainWindow to add outline cleanup.' }
           $main = $main.Insert($lastBrace, $closeMethod)
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
-using System;
-using System.Drawing;
-using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Shapes;
-
-namespace QingRecorder;
-
-internal sealed class RegionOutlineWindow : Window
-{
-    private const int GwlExStyle = -20;
-    private const int WsExTransparent = 0x00000020;
-    private const int WsExToolWindow = 0x00000080;
-    private const int WsExNoActivate = 0x08000000;
-    private const double MarginPixels = 4.0;
-    private const double BorderPixels = 3.0;
-    private readonly Rectangle _area;
-    private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
-    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
-    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    public RegionOutlineWindow(Rectangle area)
-    {
-        _area = area;
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        Content = _canvas;
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        Focusable = false;
-        IsHitTestVisible = false;
-        Topmost = true;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Width = 1;
-        Height = 1;
-
-        SourceInitialized += (_, _) =>
-        {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            var exStyle = GetWindowLong(hwnd, GwlExStyle);
-            SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
-
-            var dpi = VisualTreeHelper.GetDpi(this);
-            var sx = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-            var sy = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-
-            Left = (_area.X - MarginPixels) / sx;
-            Top = (_area.Y - MarginPixels) / sy;
-            Width = (_area.Width + MarginPixels * 2) / sx;
-            Height = (_area.Height + MarginPixels * 2) / sy;
-            _canvas.Width = Width;
-            _canvas.Height = Height;
-            _canvas.Children.Clear();
-
-            var brush = new SolidColorBrush(Color.FromRgb(72, 112, 255));
-            AddStrip(0, 0, BorderPixels / sx, Height, brush);
-            AddStrip((MarginPixels + _area.Width) / sx, 0, BorderPixels / sx, Height, brush);
-            AddStrip(MarginPixels / sx, 0, _area.Width / sx, BorderPixels / sy, brush);
-            AddStrip(MarginPixels / sx, (MarginPixels + _area.Height) / sy, _area.Width / sx, BorderPixels / sy, brush);
-        };
-    }
-
-    private void AddStrip(double left, double top, double width, double height, Brush brush)
-    {
-        var strip = new Rectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
-        Canvas.SetLeft(strip, left);
-        Canvas.SetTop(strip, top);
-        _canvas.Children.Add(strip);
-    }
-}
-'@
+          using System;
+          using DrawingRectangle = System.Drawing.Rectangle;
+          using System.Runtime.InteropServices;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Interop;
+          using System.Windows.Media;
+          using ShapesRectangle = System.Windows.Shapes.Rectangle;
+          
+          namespace QingRecorder;
+          
+          internal sealed class RegionOutlineWindow : Window
+          {
+              private const int GwlExStyle = -20;
+              private const int WsExTransparent = 0x00000020;
+              private const int WsExToolWindow = 0x00000080;
+              private const int WsExNoActivate = 0x08000000;
+              private const double MarginPixels = 4.0;
+              private const double BorderPixels = 3.0;
+              private readonly DrawingRectangle _area;
+              private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
+          
+              [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+              private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+          
+              [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+              private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+          
+              public RegionOutlineWindow(DrawingRectangle area)
+              {
+                  _area = area;
+                  WindowStyle = WindowStyle.None;
+                  ResizeMode = ResizeMode.NoResize;
+                  AllowsTransparency = true;
+                  Background = Brushes.Transparent;
+                  Content = _canvas;
+                  ShowInTaskbar = false;
+                  ShowActivated = false;
+                  Focusable = false;
+                  IsHitTestVisible = false;
+                  Topmost = true;
+                  WindowStartupLocation = WindowStartupLocation.Manual;
+                  Width = 1;
+                  Height = 1;
+          
+                  SourceInitialized += (_, _) =>
+                  {
+                      var hwnd = new WindowInteropHelper(this).Handle;
+                      var exStyle = GetWindowLong(hwnd, GwlExStyle);
+                      SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
+          
+                      var dpi = VisualTreeHelper.GetDpi(this);
+                      var sx = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+                      var sy = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+          
+                      Left = (_area.X - MarginPixels) / sx;
+                      Top = (_area.Y - MarginPixels) / sy;
+                      Width = (_area.Width + MarginPixels * 2) / sx;
+                      Height = (_area.Height + MarginPixels * 2) / sy;
+                      _canvas.Width = Width;
+                      _canvas.Height = Height;
+                      _canvas.Children.Clear();
+          
+                      var brush = new SolidColorBrush(Color.FromRgb(72, 112, 255));
+                      AddStrip(0, 0, BorderPixels / sx, Height, brush);
+                      AddStrip((MarginPixels + _area.Width) / sx, 0, BorderPixels / sx, Height, brush);
+                      AddStrip(MarginPixels / sx, 0, _area.Width / sx, BorderPixels / sy, brush);
+                      AddStrip(MarginPixels / sx, (MarginPixels + _area.Height) / sy, _area.Width / sx, BorderPixels / sy, brush);
+                  };
+              }
+          
+              private void AddStrip(double left, double top, double width, double height, Brush brush)
+              {
+                  var strip = new ShapesRectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
+                  Canvas.SetLeft(strip, left);
+                  Canvas.SetTop(strip, top);
+                  _canvas.Children.Add(strip);
+              }
+          }
+          '@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
           Write-Host 'Capture API set to DesktopDuplication; UI reduced to 640x650 at 75%; region crop assigned to DisplayRecordingSource.SourceRect; recording outline is shown outside the crop and closed on completion/failure.'
           Write-Host '===== RegionSelectionWindow.cs ====='
