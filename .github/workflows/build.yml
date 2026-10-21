@@ -179,6 +179,11 @@ jobs:
           Write-Host '===== RegionSelectionWindow.cs ====='
           $regionPath = Join-Path $root 'RegionSelectionWindow.cs'
           Get-Content -LiteralPath $regionPath | ForEach-Object { Write-Host $_ }
+          Write-Host '===== MainWindow.xaml.cs lines 1-245 ====='
+          $lineNo = 0
+          Get-Content -LiteralPath $mainPath | Select-Object -First 245 | ForEach-Object { $lineNo++; Write-Host ("{0}: {1}" -f $lineNo, $_) }
+          Write-Host '===== MainWindow.xaml event/mode references ====='
+          Select-String -LiteralPath (Join-Path $root 'MainWindow.xaml') -Pattern 'Region|Full|Mode|Checked|Click|Radio|Button' -Context 3,3 | ForEach-Object { Write-Host $_ }
           Write-Host '===== MainWindow region/capture lines ====='
           Select-String -LiteralPath $mainPath -Pattern 'Region|region|SourceRect|Selected|RecorderApi|displaySource|outputOptions|StartRecording|StopRecording' | ForEach-Object { Write-Host ("{0}: {1}" -f $_.LineNumber, $_.Line.Trim()) }
       - name: Resolve WPF and Windows Forms type conflicts
