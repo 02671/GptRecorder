@@ -383,225 +383,226 @@ jobs:
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
-using System;
-using DrawingRectangle = System.Drawing.Rectangle;
-using Brush = System.Windows.Media.Brush;
-using Brushes = System.Windows.Media.Brushes;
-using Color = System.Windows.Media.Color;
-using SolidColorBrush = System.Windows.Media.SolidColorBrush;
-using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Media;
-using ShapesRectangle = System.Windows.Shapes.Rectangle;
-
-namespace QingRecorder;
-
-internal sealed class RegionOutlineWindow : Window
-{
-    private const int GwlExStyle = -20;
-    private const int WsExTransparent = 0x00000020;
-    private const int WsExToolWindow = 0x00000080;
-    private const int WsExNoActivate = 0x08000000;
-    private const double MarginPixels = 4.0;
-    private const double BorderPixels = 3.0;
-    private DrawingRectangle _area;
-    private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
-    private double _scaleX = 1.0;
-    private double _scaleY = 1.0;
-    private bool _ready;
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
-    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
-    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    public RegionOutlineWindow(DrawingRectangle area)
-    {
-        _area = area;
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        Content = _canvas;
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        Focusable = false;
-        IsHitTestVisible = false;
-        Topmost = true;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Width = 1;
-        Height = 1;
-
-        SourceInitialized += (_, _) =>
-        {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            var exStyle = GetWindowLong(hwnd, GwlExStyle);
-            SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
-            var dpi = VisualTreeHelper.GetDpi(this);
-            _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-            _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-            _ready = true;
-            ApplyArea();
-        };
-    }
-
-    public void UpdateArea(DrawingRectangle area)
-    {
-        _area = area;
-        if (_ready) ApplyArea();
-    }
-
-    private void ApplyArea()
-    {
-        Left = (_area.X - MarginPixels) / _scaleX;
-        Top = (_area.Y - MarginPixels) / _scaleY;
-        Width = (_area.Width + MarginPixels * 2) / _scaleX;
-        Height = (_area.Height + MarginPixels * 2) / _scaleY;
-        _canvas.Width = Width;
-        _canvas.Height = Height;
-        _canvas.Children.Clear();
-
-        var brush = new SolidColorBrush(Color.FromRgb(54, 105, 232));
-        AddStrip(0, 0, BorderPixels / _scaleX, Height, brush);
-        AddStrip((MarginPixels + _area.Width) / _scaleX, 0, BorderPixels / _scaleX, Height, brush);
-        AddStrip(MarginPixels / _scaleX, 0, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
-        AddStrip(MarginPixels / _scaleX, (MarginPixels + _area.Height) / _scaleY, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
-    }
-
-    private void AddStrip(double left, double top, double width, double height, Brush brush)
-    {
-        var strip = new ShapesRectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
-        Canvas.SetLeft(strip, left);
-        Canvas.SetTop(strip, top);
-        _canvas.Children.Add(strip);
-    }
-}
-
-internal sealed class RegionMoveHandleWindow : Window
-{
-    private const int GwlExStyle = -20;
-    private const int WsExToolWindow = 0x00000080;
-    private const int WsExNoActivate = 0x08000000;
-    private const double HandleWidth = 92.0;
-    private const double HandleHeight = 25.0;
-    private const double AnchorX = 16.0;
-    private readonly Action<DrawingRectangle> _moveCallback;
-    private DrawingRectangle _area;
-    private DrawingRectangle _dragStartArea;
-    private double _dragStartLeft;
-    private double _dragStartTop;
-    private double _scaleX = 1.0;
-    private double _scaleY = 1.0;
-    private bool _dragging;
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
-    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
-    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback)
-    {
-        _area = area;
-        _moveCallback = moveCallback;
-        WindowStyle = WindowStyle.None;
-        ResizeMode = ResizeMode.NoResize;
-        AllowsTransparency = true;
-        Background = Brushes.Transparent;
-        ShowInTaskbar = false;
-        ShowActivated = false;
-        Focusable = true;
-        Topmost = true;
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Width = HandleWidth;
-        Height = HandleHeight;
-
-        var handle = new Border
-        {
-            Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
-            BorderBrush = Brushes.White,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(8, 3, 8, 3),
-            Cursor = Cursors.SizeAll,
-            Child = new TextBlock
-            {
-                Text = "↕  移动区域",
-                Foreground = Brushes.White,
-                FontSize = 11,
-                FontWeight = FontWeights.SemiBold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            }
-        };
-        Content = handle;
-        handle.MouseLeftButtonDown += OnHandleMouseDown;
-        LocationChanged += OnHandleLocationChanged;
-
-        SourceInitialized += (_, _) =>
-        {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            var exStyle = GetWindowLong(hwnd, GwlExStyle);
-            SetWindowLong(hwnd, GwlExStyle, exStyle | WsExToolWindow | WsExNoActivate);
-            var dpi = VisualTreeHelper.GetDpi(this);
-            _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-            _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-            PositionHandle();
-        };
-    }
-
-    public void UpdateArea(DrawingRectangle area)
-    {
-        _area = area;
-        if (!_dragging && IsInitialized) PositionHandle();
-    }
-
-    private void PositionHandle()
-    {
-        Left = (_area.X + AnchorX) / _scaleX;
-        Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
-    }
-
-    private void OnHandleMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Left) return;
-        _dragging = true;
-        _dragStartArea = _area;
-        _dragStartLeft = Left;
-        _dragStartTop = Top;
-        try
-        {
-            DragMove();
-        }
-        finally
-        {
-            _dragging = false;
-            PositionHandle();
-        }
-        e.Handled = true;
-    }
-
-    private void OnHandleLocationChanged(object? sender, EventArgs e)
-    {
-        if (!_dragging) return;
-        var dx = (int)Math.Round((Left - _dragStartLeft) * _scaleX);
-        var dy = (int)Math.Round((Top - _dragStartTop) * _scaleY);
-        var x = _dragStartArea.X + dx;
-        var y = _dragStartArea.Y + dy;
-
-        var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
-        if (bounds.HasValue)
-        {
-            x = Math.Clamp(x, 0, Math.Max(0, bounds.Value.Width - _dragStartArea.Width));
-            y = Math.Clamp(y, 0, Math.Max(0, bounds.Value.Height - _dragStartArea.Height));
-        }
-        _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
-    }
-}
+          using System;
+          using DrawingRectangle = System.Drawing.Rectangle;
+          using Brush = System.Windows.Media.Brush;
+          using Brushes = System.Windows.Media.Brushes;
+          using Color = System.Windows.Media.Color;
+          using SolidColorBrush = System.Windows.Media.SolidColorBrush;
+          using System.Runtime.InteropServices;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Input;
+          using System.Windows.Interop;
+          using System.Windows.Media;
+          using ShapesRectangle = System.Windows.Shapes.Rectangle;
+          
+          namespace QingRecorder;
+          
+          internal sealed class RegionOutlineWindow : Window
+          {
+              private const int GwlExStyle = -20;
+              private const int WsExTransparent = 0x00000020;
+              private const int WsExToolWindow = 0x00000080;
+              private const int WsExNoActivate = 0x08000000;
+              private const double MarginPixels = 4.0;
+              private const double BorderPixels = 3.0;
+              private DrawingRectangle _area;
+              private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
+              private double _scaleX = 1.0;
+              private double _scaleY = 1.0;
+              private bool _ready;
+          
+              [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+              private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+          
+              [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+              private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+          
+              public RegionOutlineWindow(DrawingRectangle area)
+              {
+                  _area = area;
+                  WindowStyle = WindowStyle.None;
+                  ResizeMode = ResizeMode.NoResize;
+                  AllowsTransparency = true;
+                  Background = Brushes.Transparent;
+                  Content = _canvas;
+                  ShowInTaskbar = false;
+                  ShowActivated = false;
+                  Focusable = false;
+                  IsHitTestVisible = false;
+                  Topmost = true;
+                  WindowStartupLocation = WindowStartupLocation.Manual;
+                  Width = 1;
+                  Height = 1;
+          
+                  SourceInitialized += (_, _) =>
+                  {
+                      var hwnd = new WindowInteropHelper(this).Handle;
+                      var exStyle = GetWindowLong(hwnd, GwlExStyle);
+                      SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
+                      var dpi = VisualTreeHelper.GetDpi(this);
+                      _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+                      _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+                      _ready = true;
+                      ApplyArea();
+                  };
+              }
+          
+              public void UpdateArea(DrawingRectangle area)
+              {
+                  _area = area;
+                  if (_ready) ApplyArea();
+              }
+          
+              private void ApplyArea()
+              {
+                  Left = (_area.X - MarginPixels) / _scaleX;
+                  Top = (_area.Y - MarginPixels) / _scaleY;
+                  Width = (_area.Width + MarginPixels * 2) / _scaleX;
+                  Height = (_area.Height + MarginPixels * 2) / _scaleY;
+                  _canvas.Width = Width;
+                  _canvas.Height = Height;
+                  _canvas.Children.Clear();
+          
+                  var brush = new SolidColorBrush(Color.FromRgb(54, 105, 232));
+                  AddStrip(0, 0, BorderPixels / _scaleX, Height, brush);
+                  AddStrip((MarginPixels + _area.Width) / _scaleX, 0, BorderPixels / _scaleX, Height, brush);
+                  AddStrip(MarginPixels / _scaleX, 0, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
+                  AddStrip(MarginPixels / _scaleX, (MarginPixels + _area.Height) / _scaleY, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
+              }
+          
+              private void AddStrip(double left, double top, double width, double height, Brush brush)
+              {
+                  var strip = new ShapesRectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
+                  Canvas.SetLeft(strip, left);
+                  Canvas.SetTop(strip, top);
+                  _canvas.Children.Add(strip);
+              }
+          }
+          
+          internal sealed class RegionMoveHandleWindow : Window
+          {
+              private const int GwlExStyle = -20;
+              private const int WsExToolWindow = 0x00000080;
+              private const int WsExNoActivate = 0x08000000;
+              private const double HandleWidth = 92.0;
+              private const double HandleHeight = 25.0;
+              private const double AnchorX = 16.0;
+              private readonly Action<DrawingRectangle> _moveCallback;
+              private DrawingRectangle _area;
+              private DrawingRectangle _dragStartArea;
+              private double _dragStartLeft;
+              private double _dragStartTop;
+              private double _scaleX = 1.0;
+              private double _scaleY = 1.0;
+              private bool _dragging;
+          
+              [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+              private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+          
+              [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+              private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+          
+              public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback)
+              {
+                  _area = area;
+                  _moveCallback = moveCallback;
+                  WindowStyle = WindowStyle.None;
+                  ResizeMode = ResizeMode.NoResize;
+                  AllowsTransparency = true;
+                  Background = Brushes.Transparent;
+                  ShowInTaskbar = false;
+                  ShowActivated = false;
+                  Focusable = true;
+                  Topmost = true;
+                  WindowStartupLocation = WindowStartupLocation.Manual;
+                  Width = HandleWidth;
+                  Height = HandleHeight;
+          
+                  var handle = new Border
+                  {
+                      Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
+                      BorderBrush = Brushes.White,
+                      BorderThickness = new Thickness(1),
+                      CornerRadius = new CornerRadius(6),
+                      Padding = new Thickness(8, 3, 8, 3),
+                      Cursor = Cursors.SizeAll,
+                      Child = new TextBlock
+                      {
+                          Text = "↕  移动区域",
+                          Foreground = Brushes.White,
+                          FontSize = 11,
+                          FontWeight = FontWeights.SemiBold,
+                          HorizontalAlignment = HorizontalAlignment.Center,
+                          VerticalAlignment = VerticalAlignment.Center
+                      }
+                  };
+                  Content = handle;
+                  handle.MouseLeftButtonDown += OnHandleMouseDown;
+                  LocationChanged += OnHandleLocationChanged;
+          
+                  SourceInitialized += (_, _) =>
+                  {
+                      var hwnd = new WindowInteropHelper(this).Handle;
+                      var exStyle = GetWindowLong(hwnd, GwlExStyle);
+                      SetWindowLong(hwnd, GwlExStyle, exStyle | WsExToolWindow | WsExNoActivate);
+                      var dpi = VisualTreeHelper.GetDpi(this);
+                      _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+                      _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+                      PositionHandle();
+                  };
+              }
+          
+              public void UpdateArea(DrawingRectangle area)
+              {
+                  _area = area;
+                  if (!_dragging && IsInitialized) PositionHandle();
+              }
+          
+              private void PositionHandle()
+              {
+                  Left = (_area.X + AnchorX) / _scaleX;
+                  Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
+              }
+          
+              private void OnHandleMouseDown(object sender, MouseButtonEventArgs e)
+              {
+                  if (e.ChangedButton != MouseButton.Left) return;
+                  _dragging = true;
+                  _dragStartArea = _area;
+                  _dragStartLeft = Left;
+                  _dragStartTop = Top;
+                  try
+                  {
+                      DragMove();
+                  }
+                  finally
+                  {
+                      _dragging = false;
+                      PositionHandle();
+                  }
+                  e.Handled = true;
+              }
+          
+              private void OnHandleLocationChanged(object? sender, EventArgs e)
+              {
+                  if (!_dragging) return;
+                  var dx = (int)Math.Round((Left - _dragStartLeft) * _scaleX);
+                  var dy = (int)Math.Round((Top - _dragStartTop) * _scaleY);
+                  var x = _dragStartArea.X + dx;
+                  var y = _dragStartArea.Y + dy;
+          
+                  var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
+                  if (bounds.HasValue)
+                  {
+                      x = Math.Clamp(x, 0, Math.Max(0, bounds.Value.Width - _dragStartArea.Width));
+                      y = Math.Clamp(y, 0, Math.Max(0, bounds.Value.Height - _dragStartArea.Height));
+                  }
+                  _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
+              }
+          }
+          
           '@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
           Write-Host 'Compact borderless toolbar built; region outline and draggable move handle stay visible; region updates are applied dynamically during recording.'
