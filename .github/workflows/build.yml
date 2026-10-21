@@ -23,6 +23,19 @@ jobs:
           $project = Get-ChildItem -Path .\_src -Filter QingRecorder.csproj -Recurse | Select-Object -First 1
           if (!$project) { throw 'QingRecorder.csproj was not found inside project.zip.' }
           "PROJECT_FILE=$($project.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Resolve WPF and Windows Forms type conflicts
+        shell: pwsh
+        run: |
+          $root = Split-Path $env:PROJECT_FILE
+          $appPath = Join-Path $root 'App.xaml.cs'
+          $app = Get-Content -LiteralPath $appPath -Raw
+          $app = $app.Replace('public partial class App : Application', 'public partial class App : System.Windows.Application')
+          Set-Content -LiteralPath $appPath -Value $app -Encoding utf8
+          $regionPath = Join-Path $root 'RegionSelectionWindow.cs'
+          $region = Get-Content -LiteralPath $regionPath -Raw
+          $aliases = "using MouseEventArgs = System.Windows.Input.MouseEventArgs;`nusing KeyEventArgs = System.Windows.Input.KeyEventArgs;`nusing Point = System.Windows.Point;"
+          $region = $region.Replace('using System.Windows.Input;', "using System.Windows.Input;`n$aliases")
+          Set-Content -LiteralPath $regionPath -Value $region -Encoding utf8
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
