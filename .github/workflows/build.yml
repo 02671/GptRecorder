@@ -602,9 +602,9 @@ internal sealed class RegionMoveHandleWindow : Window
         _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
     }
 }
-'@
+          '@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
-          Write-Host 'Capture API set to DesktopDuplication; UI reduced to 640x650 at 75%; region crop assigned to DisplayRecordingSource.SourceRect; recording outline is shown outside the crop and closed on completion/failure.'
+          Write-Host 'Compact borderless toolbar built; region outline and draggable move handle stay visible; region updates are applied dynamically during recording.'
           Write-Host '===== RegionSelectionWindow.cs ====='
           $regionPath = Join-Path $root 'RegionSelectionWindow.cs'
           Get-Content -LiteralPath $regionPath | ForEach-Object { Write-Host $_ }
