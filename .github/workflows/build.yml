@@ -23,6 +23,15 @@ jobs:
           $project = Get-ChildItem -Path .\_src -Filter QingRecorder.csproj -Recurse | Select-Object -First 1
           if (!$project) { throw 'QingRecorder.csproj was not found inside project.zip.' }
           "PROJECT_FILE=$($project.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Inspect capture and layout source
+        shell: pwsh
+        run: |
+          $root = Split-Path $env:PROJECT_FILE
+          $patterns = 'RecorderApi|DisplayRecordingSource|WindowRecordingSource|RecordingSources|SourceRect|ScreenRect|Width=|Height=|MinWidth|MinHeight|WindowState|WindowStartupLocation|SizeToContent|ResizeMode|new Recorder|new RecorderOptions|recordSystemAudio|recordMicrophone|LoopbackAudioSource|CaptureAudioSource'
+          Get-ChildItem -Path $root -Recurse -File -Include 'MainWindow.xaml','MainWindow.xaml.cs','RegionSelectionWindow.cs','App.xaml' | ForEach-Object {
+            Write-Host "===== SOURCE: $($_.FullName) ====="
+            Select-String -LiteralPath $_.FullName -Pattern $patterns | ForEach-Object { Write-Host ("{0}:{1}: {2}" -f $_.Path,$_.LineNumber,$_.Line.Trim()) }
+          }
       - name: Resolve WPF and Windows Forms type conflicts
         shell: pwsh
         run: |
