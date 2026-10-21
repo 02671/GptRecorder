@@ -49,9 +49,9 @@ jobs:
           <Window x:Class="QingRecorder.MainWindow"
                   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                  Title="轻录屏" Height="88" Width="830" MinHeight="88" MinWidth="800"
+                  Title="轻录屏" Height="66" Width="700" MinHeight="66" MinWidth="700"
                   WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None"
-                  Background="#F1F5FA" ShowInTaskbar="True"
+                  Background="#FFFFFF" ShowInTaskbar="True"
                   Loaded="MainWindow_Loaded" SourceInitialized="MainWindow_SourceInitialized" Closing="MainWindow_Closing">
               <Window.Resources>
                   <Style x:Key="ActionButton" TargetType="{x:Type Button}">
@@ -124,14 +124,14 @@ jobs:
                       </Setter>
                   </Style>
               </Window.Resources>
-              <Grid Margin="8">
+              <Grid Margin="2">
                   <Grid.RowDefinitions>
                       <RowDefinition Height="Auto"/>
                       <RowDefinition Height="Auto"/>
                   </Grid.RowDefinitions>
-                  <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#DCE4EF" BorderThickness="1" CornerRadius="9" Padding="9,8" MouseLeftButtonDown="ToolbarSurface_MouseLeftButtonDown">
+                  <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="Transparent" BorderThickness="0" CornerRadius="5" Padding="6,5" MouseLeftButtonDown="ToolbarSurface_MouseLeftButtonDown">
                       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                          <RadioButton x:Name="FullScreenRadio" Style="{StaticResource ModeRadio}" GroupName="CaptureMode" IsChecked="True" Content="全屏"/>
+                          <RadioButton x:Name="FullScreenRadio" Style="{StaticResource ModeRadio}" Click="FullScreenRadio_Click" GroupName="CaptureMode" IsChecked="True" Content="全屏"/>
                           <RadioButton x:Name="RegionRadio" Style="{StaticResource ModeRadio}" Click="RegionRadio_Click" GroupName="CaptureMode" Content="区域"/>
                           <Border Width="1" Height="28" Background="#E1E7F0" Margin="2,0,8,0"/>
                           <Button x:Name="RecordButton" Style="{StaticResource ActionButton}" MinWidth="96" Margin="0,0,6,0" Content="●  开始录制" Click="RecordButton_Click" Background="#3569E8" Foreground="#FFFFFF" BorderBrush="#3569E8"/>
@@ -184,7 +184,7 @@ jobs:
           if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
             $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
             if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
-            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;"
+            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private DisplayRecordingSource? _activeDisplaySource;"
             $main = $main.Insert($classForState.Index + $classForState.Length, $stateFields)
           }
           $oldRegionFlow = '(?s)DrawingRectangle\? selectedRegion = null;\s*if \(RegionRadio\.IsChecked == true\)\s*\{\s*ShowInTaskbar = true;.*?selectedRegion = selector\.SelectedArea;\s*\}'
@@ -217,6 +217,7 @@ jobs:
                   _isOpeningRegionSelector = true;
                   try
                   {
+                      CloseRegionOutline();
                       ShowInTaskbar = true;
                       WindowState = WindowState.Normal;
                       Activate();
@@ -229,7 +230,8 @@ jobs:
                           return;
                       }
                       _selectedRegionForRecording = selector.SelectedArea;
-                      SetStatus("已选择区域，点击开始录制", StatusTone.Ready);
+                      ShowRegionOutline(selector.SelectedArea.Value);
+                      SetStatus("已选择区域，可拖动外侧“移动区域”把手调整位置", StatusTone.Ready);
                   }
                   finally
                   {
@@ -249,7 +251,7 @@ jobs:
               {
                   var expanded = OptionsPanel.Visibility != Visibility.Visible;
                   OptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-                  Height = expanded ? 230 : 88;
+                  Height = expanded ? 200 : 66;
                   OptionsButton.Content = expanded ? "收起" : "选项";
               }
 
@@ -280,6 +282,10 @@ jobs:
           } elseif (!$main.Contains('TimerText.Text = "00:00:00";')) {
             throw 'Could not locate the start-recording status to initialize the timer.'
           }
+          $audioMarker = 'var audioSources = new List<AudioSourceBase>();'
+          if ($main.Contains($audioMarker) -and !$main.Contains('_activeDisplaySource = displaySource;')) {
+            $main = $main.Replace($audioMarker, '_activeDisplaySource = displaySource;' + [Environment]::NewLine + '            ' + $audioMarker)
+          }
           $oldApi = 'displaySource.RecorderApi = RecorderApi.WindowsGraphicsCapture;'
           if ($main.Contains($oldApi)) {
             $main = $main.Replace($oldApi, 'displaySource.RecorderApi = RecorderApi.DesktopDuplication;')
@@ -297,121 +303,306 @@ jobs:
           if (!$main.Contains('private RegionOutlineWindow? _regionOutlineWindow;')) {
             $main = $main.Insert($classMatch.Index + $classMatch.Length, "`r`n    private RegionOutlineWindow? _regionOutlineWindow;")
           }
-          $recordMatch = [regex]::Match($main, '(?<object>[A-Za-z_]\w*)\.Record\s*\(')
-          if (!$recordMatch.Success) { throw 'Could not find the recorder Record(...) call for outline lifetime hooks.' }
-          $recordObject = $recordMatch.Groups['object'].Value
-          $lineStart = $main.LastIndexOf("`n", $recordMatch.Index)
-          if ($lineStart -lt 0) { $lineStart = 0 } else { $lineStart++ }
-          $indent = [regex]::Match($main.Substring($lineStart, $recordMatch.Index - $lineStart), '^\s*').Value
-          $hooks = @"
-          ${indent}if (selectedRegion.HasValue)
-          ${indent}{
-          ${indent}    _regionOutlineWindow = new RegionOutlineWindow(selectedRegion.Value);
-          ${indent}    _regionOutlineWindow.Show();
-          ${indent}}
-          ${indent}$recordObject.OnRecordingComplete += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
-          ${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(CloseRegionOutline));
-          "@
-          $main = $main.Insert($lineStart, $hooks + "`r`n")
-          $closeMethod = @'
+          $helperMethods = @'
+              private void FullScreenRadio_Click(object sender, RoutedEventArgs e)
+              {
+                  if (!IsLoaded || _isStarting || _isRecording || _isStopping) return;
+                  _selectedRegionForRecording = null;
+                  _activeDisplaySource = null;
+                  CloseRegionOutline();
+                  SetStatus("全屏录制模式", StatusTone.Ready);
+              }
+
+              private void ShowRegionOutline(DrawingRectangle area)
+              {
+                  if (_regionOutlineWindow == null || !_regionOutlineWindow.IsVisible)
+                  {
+                      _regionOutlineWindow?.Close();
+                      _regionOutlineWindow = new RegionOutlineWindow(area);
+                      _regionOutlineWindow.Show();
+                  }
+                  else
+                  {
+                      _regionOutlineWindow.UpdateArea(area);
+                  }
+
+                  if (_regionMoveHandleWindow == null || !_regionMoveHandleWindow.IsVisible)
+                  {
+                      _regionMoveHandleWindow?.Close();
+                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion);
+                      _regionMoveHandleWindow.Show();
+                  }
+                  else
+                  {
+                      _regionMoveHandleWindow.UpdateArea(area);
+                  }
+              }
+
+              private void UpdateSelectedRegion(DrawingRectangle area)
+              {
+                  _selectedRegionForRecording = area;
+                  _regionOutlineWindow?.UpdateArea(area);
+                  _regionMoveHandleWindow?.UpdateArea(area);
+
+                  if (!_isRecording || _recorder == null || _activeDisplaySource == null) return;
+                  try
+                  {
+                      _activeDisplaySource.SourceRect = new ScreenRect(area.X, area.Y, area.Width, area.Height);
+                      var applied = _recorder.GetDynamicOptionsBuilder()
+                          .SetUpdatedRecordingSource(_activeDisplaySource)
+                          .Apply();
+                      if (!applied)
+                          SetStatus("区域位置暂未应用，请稍后重试", StatusTone.Busy);
+                  }
+                  catch
+                  {
+                      SetStatus("区域位置更新失败", StatusTone.Error);
+                  }
+              }
+
               private void CloseRegionOutline()
               {
-                  if (_regionOutlineWindow == null) return;
-                  _regionOutlineWindow.Close();
-                  _regionOutlineWindow = null;
+                  if (_regionMoveHandleWindow != null)
+                  {
+                      _regionMoveHandleWindow.Close();
+                      _regionMoveHandleWindow = null;
+                  }
+                  if (_regionOutlineWindow != null)
+                  {
+                      _regionOutlineWindow.Close();
+                      _regionOutlineWindow = null;
+                  }
               }
-          
+
           '@
-          $lastBrace = $main.LastIndexOf('}')
-          if ($lastBrace -lt 0) { throw 'Could not find end of MainWindow to add outline cleanup.' }
-          $main = $main.Insert($lastBrace, $closeMethod)
+          $startMethod = [regex]::Match($main, '(?m)^\s*private async Task StartRecordingAsync\s*\(')
+          if (!$startMethod.Success) { throw 'Could not find StartRecordingAsync to insert region outline helpers.' }
+          if (!$main.Contains('private void UpdateSelectedRegion(DrawingRectangle area)')) {
+            $main = $main.Insert($startMethod.Index, $helperMethods)
+          }
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
-          using System;
-          using DrawingRectangle = System.Drawing.Rectangle;
-          using Brush = System.Windows.Media.Brush;
-          using Brushes = System.Windows.Media.Brushes;
-          using Color = System.Windows.Media.Color;
-          using SolidColorBrush = System.Windows.Media.SolidColorBrush;
-          using System.Runtime.InteropServices;
-          using System.Windows;
-          using System.Windows.Controls;
-          using System.Windows.Interop;
-          using System.Windows.Media;
-          using ShapesRectangle = System.Windows.Shapes.Rectangle;
-          
-          namespace QingRecorder;
-          
-          internal sealed class RegionOutlineWindow : Window
-          {
-              private const int GwlExStyle = -20;
-              private const int WsExTransparent = 0x00000020;
-              private const int WsExToolWindow = 0x00000080;
-              private const int WsExNoActivate = 0x08000000;
-              private const double MarginPixels = 4.0;
-              private const double BorderPixels = 3.0;
-              private readonly DrawingRectangle _area;
-              private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
-          
-              [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
-              private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-          
-              [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
-              private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-          
-              public RegionOutlineWindow(DrawingRectangle area)
-              {
-                  _area = area;
-                  WindowStyle = WindowStyle.None;
-                  ResizeMode = ResizeMode.NoResize;
-                  AllowsTransparency = true;
-                  Background = Brushes.Transparent;
-                  Content = _canvas;
-                  ShowInTaskbar = false;
-                  ShowActivated = false;
-                  Focusable = false;
-                  IsHitTestVisible = false;
-                  Topmost = true;
-                  WindowStartupLocation = WindowStartupLocation.Manual;
-                  Width = 1;
-                  Height = 1;
-          
-                  SourceInitialized += (_, _) =>
-                  {
-                      var hwnd = new WindowInteropHelper(this).Handle;
-                      var exStyle = GetWindowLong(hwnd, GwlExStyle);
-                      SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
-          
-                      var dpi = VisualTreeHelper.GetDpi(this);
-                      var sx = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
-                      var sy = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
-          
-                      Left = (_area.X - MarginPixels) / sx;
-                      Top = (_area.Y - MarginPixels) / sy;
-                      Width = (_area.Width + MarginPixels * 2) / sx;
-                      Height = (_area.Height + MarginPixels * 2) / sy;
-                      _canvas.Width = Width;
-                      _canvas.Height = Height;
-                      _canvas.Children.Clear();
-          
-                      var brush = new SolidColorBrush(Color.FromRgb(72, 112, 255));
-                      AddStrip(0, 0, BorderPixels / sx, Height, brush);
-                      AddStrip((MarginPixels + _area.Width) / sx, 0, BorderPixels / sx, Height, brush);
-                      AddStrip(MarginPixels / sx, 0, _area.Width / sx, BorderPixels / sy, brush);
-                      AddStrip(MarginPixels / sx, (MarginPixels + _area.Height) / sy, _area.Width / sx, BorderPixels / sy, brush);
-                  };
-              }
-          
-              private void AddStrip(double left, double top, double width, double height, Brush brush)
-              {
-                  var strip = new ShapesRectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
-                  Canvas.SetLeft(strip, left);
-                  Canvas.SetTop(strip, top);
-                  _canvas.Children.Add(strip);
-              }
-          }
-          '@
+using System;
+using DrawingRectangle = System.Drawing.Rectangle;
+using Brush = System.Windows.Media.Brush;
+using Brushes = System.Windows.Media.Brushes;
+using Color = System.Windows.Media.Color;
+using SolidColorBrush = System.Windows.Media.SolidColorBrush;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using ShapesRectangle = System.Windows.Shapes.Rectangle;
+
+namespace QingRecorder;
+
+internal sealed class RegionOutlineWindow : Window
+{
+    private const int GwlExStyle = -20;
+    private const int WsExTransparent = 0x00000020;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExNoActivate = 0x08000000;
+    private const double MarginPixels = 4.0;
+    private const double BorderPixels = 3.0;
+    private DrawingRectangle _area;
+    private readonly Canvas _canvas = new Canvas { Background = Brushes.Transparent };
+    private double _scaleX = 1.0;
+    private double _scaleY = 1.0;
+    private bool _ready;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public RegionOutlineWindow(DrawingRectangle area)
+    {
+        _area = area;
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
+        Content = _canvas;
+        ShowInTaskbar = false;
+        ShowActivated = false;
+        Focusable = false;
+        IsHitTestVisible = false;
+        Topmost = true;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Width = 1;
+        Height = 1;
+
+        SourceInitialized += (_, _) =>
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var exStyle = GetWindowLong(hwnd, GwlExStyle);
+            SetWindowLong(hwnd, GwlExStyle, exStyle | WsExTransparent | WsExToolWindow | WsExNoActivate);
+            var dpi = VisualTreeHelper.GetDpi(this);
+            _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+            _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+            _ready = true;
+            ApplyArea();
+        };
+    }
+
+    public void UpdateArea(DrawingRectangle area)
+    {
+        _area = area;
+        if (_ready) ApplyArea();
+    }
+
+    private void ApplyArea()
+    {
+        Left = (_area.X - MarginPixels) / _scaleX;
+        Top = (_area.Y - MarginPixels) / _scaleY;
+        Width = (_area.Width + MarginPixels * 2) / _scaleX;
+        Height = (_area.Height + MarginPixels * 2) / _scaleY;
+        _canvas.Width = Width;
+        _canvas.Height = Height;
+        _canvas.Children.Clear();
+
+        var brush = new SolidColorBrush(Color.FromRgb(54, 105, 232));
+        AddStrip(0, 0, BorderPixels / _scaleX, Height, brush);
+        AddStrip((MarginPixels + _area.Width) / _scaleX, 0, BorderPixels / _scaleX, Height, brush);
+        AddStrip(MarginPixels / _scaleX, 0, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
+        AddStrip(MarginPixels / _scaleX, (MarginPixels + _area.Height) / _scaleY, _area.Width / _scaleX, BorderPixels / _scaleY, brush);
+    }
+
+    private void AddStrip(double left, double top, double width, double height, Brush brush)
+    {
+        var strip = new ShapesRectangle { Width = width, Height = height, Fill = brush, IsHitTestVisible = false };
+        Canvas.SetLeft(strip, left);
+        Canvas.SetTop(strip, top);
+        _canvas.Children.Add(strip);
+    }
+}
+
+internal sealed class RegionMoveHandleWindow : Window
+{
+    private const int GwlExStyle = -20;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExNoActivate = 0x08000000;
+    private const double HandleWidth = 92.0;
+    private const double HandleHeight = 25.0;
+    private const double AnchorX = 16.0;
+    private readonly Action<DrawingRectangle> _moveCallback;
+    private DrawingRectangle _area;
+    private DrawingRectangle _dragStartArea;
+    private double _dragStartLeft;
+    private double _dragStartTop;
+    private double _scaleX = 1.0;
+    private double _scaleY = 1.0;
+    private bool _dragging;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback)
+    {
+        _area = area;
+        _moveCallback = moveCallback;
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        AllowsTransparency = true;
+        Background = Brushes.Transparent;
+        ShowInTaskbar = false;
+        ShowActivated = false;
+        Focusable = true;
+        Topmost = true;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Width = HandleWidth;
+        Height = HandleHeight;
+
+        var handle = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8, 3, 8, 3),
+            Cursor = Cursors.SizeAll,
+            Child = new TextBlock
+            {
+                Text = "↕  移动区域",
+                Foreground = Brushes.White,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        Content = handle;
+        handle.MouseLeftButtonDown += OnHandleMouseDown;
+        LocationChanged += OnHandleLocationChanged;
+
+        SourceInitialized += (_, _) =>
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var exStyle = GetWindowLong(hwnd, GwlExStyle);
+            SetWindowLong(hwnd, GwlExStyle, exStyle | WsExToolWindow | WsExNoActivate);
+            var dpi = VisualTreeHelper.GetDpi(this);
+            _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+            _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+            PositionHandle();
+        };
+    }
+
+    public void UpdateArea(DrawingRectangle area)
+    {
+        _area = area;
+        if (!_dragging && IsInitialized) PositionHandle();
+    }
+
+    private void PositionHandle()
+    {
+        Left = (_area.X + AnchorX) / _scaleX;
+        Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
+    }
+
+    private void OnHandleMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        _dragging = true;
+        _dragStartArea = _area;
+        _dragStartLeft = Left;
+        _dragStartTop = Top;
+        try
+        {
+            DragMove();
+        }
+        finally
+        {
+            _dragging = false;
+            PositionHandle();
+        }
+        e.Handled = true;
+    }
+
+    private void OnHandleLocationChanged(object? sender, EventArgs e)
+    {
+        if (!_dragging) return;
+        var dx = (int)Math.Round((Left - _dragStartLeft) * _scaleX);
+        var dy = (int)Math.Round((Top - _dragStartTop) * _scaleY);
+        var x = _dragStartArea.X + dx;
+        var y = _dragStartArea.Y + dy;
+
+        var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
+        if (bounds.HasValue)
+        {
+            x = Math.Clamp(x, 0, Math.Max(0, bounds.Value.Width - _dragStartArea.Width));
+            y = Math.Clamp(y, 0, Math.Max(0, bounds.Value.Height - _dragStartArea.Height));
+        }
+        _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
+    }
+}
+'@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
           Write-Host 'Capture API set to DesktopDuplication; UI reduced to 640x650 at 75%; region crop assigned to DisplayRecordingSource.SourceRect; recording outline is shown outside the crop and closed on completion/failure.'
           Write-Host '===== RegionSelectionWindow.cs ====='
