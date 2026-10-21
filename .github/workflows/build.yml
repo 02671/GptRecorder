@@ -39,9 +39,76 @@ jobs:
             $transform = '<Grid.LayoutTransform><ScaleTransform ScaleX="0.75" ScaleY="0.75" /></Grid.LayoutTransform>' + [Environment]::NewLine + '    '
             $xaml = $xaml.Insert($rowIndex, $transform)
           }
+          $regionRadioToken = '<RadioButton x:Name="RegionRadio" GroupName="CaptureMode"'
+          if ($xaml.Contains($regionRadioToken)) {
+            $xaml = $xaml.Replace($regionRadioToken, '<RadioButton x:Name="RegionRadio" Click="RegionRadio_Click" GroupName="CaptureMode"')
+          } elseif (!$xaml.Contains('Click="RegionRadio_Click"')) {
+            throw 'Could not find RegionRadio in MainWindow.xaml.'
+          }
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
+          if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
+            $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
+            if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
+            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;"
+            $main = $main.Insert($classForState.Index + $classForState.Length, $stateFields)
+          }
+          $oldRegionFlow = '(?s)DrawingRectangle\? selectedRegion = null;\s*if \(RegionRadio\.IsChecked == true\)\s*\{\s*ShowInTaskbar = true;.*?selectedRegion = selector\.SelectedArea;\s*\}'
+          $newRegionFlow = @'
+          DrawingRectangle? selectedRegion = null;
+          if (RegionRadio.IsChecked == true)
+          {
+              selectedRegion = _selectedRegionForRecording;
+              if (selectedRegion is null)
+              {
+                  SetStatus("请先点击“区域录制”并完成区域框选", StatusTone.Ready);
+                  return;
+              }
+          }
+          else
+          {
+              _selectedRegionForRecording = null;
+          }
+          '@
+          $patchedRegionFlow = [regex]::Replace($main, $oldRegionFlow, $newRegionFlow, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+          if ($patchedRegionFlow -eq $main -and !$main.Contains('selectedRegion = _selectedRegionForRecording;')) {
+            throw 'Could not replace the original region-selection block in StartRecordingAsync.'
+          }
+          $main = $patchedRegionFlow
+          if (!$main.Contains('private void RegionRadio_Click(object sender, RoutedEventArgs e)')) {
+            $regionHandler = @'
+              private void RegionRadio_Click(object sender, RoutedEventArgs e)
+              {
+                  if (!IsLoaded || _isStarting || _isRecording || _isStopping || _isOpeningRegionSelector) return;
+                  _isOpeningRegionSelector = true;
+                  try
+                  {
+                      ShowInTaskbar = true;
+                      WindowState = WindowState.Normal;
+                      Activate();
+                      var selector = new RegionSelectionWindow { Owner = this };
+                      var accepted = selector.ShowDialog();
+                      if (accepted != true || selector.SelectedArea is null)
+                      {
+                          _selectedRegionForRecording = null;
+                          SetStatus("已取消区域选择，请重新点击“区域录制”框选", StatusTone.Ready);
+                          return;
+                      }
+                      _selectedRegionForRecording = selector.SelectedArea;
+                      SetStatus("已选择区域，点击开始录制", StatusTone.Ready);
+                  }
+                  finally
+                  {
+                      _isOpeningRegionSelector = false;
+                  }
+              }
+
+          '@
+            $startMethod = [regex]::Match($main, '(?m)^\s*private async Task StartRecordingAsync\s*\(')
+            if (!$startMethod.Success) { throw 'Could not find StartRecordingAsync to insert the region-click handler.' }
+            $main = $main.Insert($startMethod.Index, $regionHandler)
+          }
           $oldApi = 'displaySource.RecorderApi = RecorderApi.WindowsGraphicsCapture;'
           if ($main.Contains($oldApi)) {
             $main = $main.Replace($oldApi, 'displaySource.RecorderApi = RecorderApi.DesktopDuplication;')
@@ -179,11 +246,6 @@ jobs:
           Write-Host '===== RegionSelectionWindow.cs ====='
           $regionPath = Join-Path $root 'RegionSelectionWindow.cs'
           Get-Content -LiteralPath $regionPath | ForEach-Object { Write-Host $_ }
-          Write-Host '===== MainWindow.xaml.cs lines 1-245 ====='
-          $lineNo = 0
-          Get-Content -LiteralPath $mainPath | Select-Object -First 245 | ForEach-Object { $lineNo++; Write-Host ("{0}: {1}" -f $lineNo, $_) }
-          Write-Host '===== MainWindow.xaml event/mode references ====='
-          Select-String -LiteralPath (Join-Path $root 'MainWindow.xaml') -Pattern 'Region|Full|Mode|Checked|Click|Radio|Button' -Context 3,3 | ForEach-Object { Write-Host $_ }
           Write-Host '===== MainWindow region/capture lines ====='
           Select-String -LiteralPath $mainPath -Pattern 'Region|region|SourceRect|Selected|RecorderApi|displaySource|outputOptions|StartRecording|StopRecording' | ForEach-Object { Write-Host ("{0}: {1}" -f $_.LineNumber, $_.Line.Trim()) }
       - name: Resolve WPF and Windows Forms type conflicts
