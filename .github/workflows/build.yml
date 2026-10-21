@@ -15,14 +15,14 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Reassemble project archive
+      - name: Verify and extract project archive
         shell: pwsh
         run: |
-          $parts = Get-ChildItem -Path . -Filter 'project-archive.part*.txt' | Sort-Object Name
-          if ($parts.Count -lt 1) { throw 'Project archive parts are missing.' }
-          $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
-          [IO.File]::WriteAllBytes("$PWD\project.zip", [Convert]::FromBase64String($encoded))
+          if (!(Test-Path .\project.zip)) { throw 'Please upload the provided project ZIP to the repository root as project.zip.' }
           Expand-Archive -Path .\project.zip -DestinationPath .\_src -Force
+          $project = Get-ChildItem -Path .\_src -Filter QingRecorder.csproj -Recurse | Select-Object -First 1
+          if (!$project) { throw 'QingRecorder.csproj was not found inside project.zip.' }
+          "PROJECT_FILE=$($project.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -30,7 +30,7 @@ jobs:
       - name: Publish self-contained Windows x64 app
         shell: pwsh
         run: |
-          dotnet publish .\_src\GptRecorder\QingRecorder\QingRecorder.csproj --configuration Release --runtime win-x64 --self-contained true -p:Platform=x64 -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish
+          dotnet publish "$env:PROJECT_FILE" --configuration Release --runtime win-x64 --self-contained true -p:Platform=x64 -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish
           if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
           Compress-Archive -Path '.\artifacts\publish\*' -DestinationPath '.\artifacts\轻录屏-Windows-x64.zip' -Force
       - name: Upload build artifact
