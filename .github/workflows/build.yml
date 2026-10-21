@@ -31,12 +31,12 @@ jobs:
           $xaml = Get-Content -LiteralPath $xamlPath -Raw
           $oldWindowSize = 'Height="790" Width="720" MinHeight="790" MinWidth="720"'
           if (!$xaml.Contains($oldWindowSize)) { throw 'Could not find the original main-window dimensions.' }
-          $xaml = $xaml.Replace($oldWindowSize, 'Height="700" Width="640" MinHeight="700" MinWidth="640"')
+          $xaml = $xaml.Replace($oldWindowSize, 'Height="650" Width="640" MinHeight="650" MinWidth="640"')
           $rowToken = '<Grid.RowDefinitions>'
           $rowIndex = $xaml.IndexOf($rowToken, [StringComparison]::Ordinal)
           if ($rowIndex -lt 0) { throw 'Could not find the main layout grid.' }
           if (!$xaml.Contains('<Grid.LayoutTransform>')) {
-            $transform = '<Grid.LayoutTransform><ScaleTransform ScaleX="0.87" ScaleY="0.87" /></Grid.LayoutTransform>' + [Environment]::NewLine + '    '
+            $transform = '<Grid.LayoutTransform><ScaleTransform ScaleX="0.75" ScaleY="0.75" /></Grid.LayoutTransform>' + [Environment]::NewLine + '    '
             $xaml = $xaml.Insert($rowIndex, $transform)
           }
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
@@ -48,8 +48,19 @@ jobs:
           } elseif (!$main.Contains('displaySource.RecorderApi = RecorderApi.DesktopDuplication;')) {
             throw 'Could not locate the display capture API assignment.'
           }
+          $cropPattern = 'outputOptions\.SourceRect\s*=\s*new ScreenRect\(rect\.X,\s*rect\.Y,\s*rect\.Width,\s*rect\.Height\);'
+          $fixedMain = [regex]::Replace($main, $cropPattern, 'displaySource.SourceRect = new ScreenRect(rect.X, rect.Y, rect.Width, rect.Height);', [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+          if ($fixedMain -eq $main -and !$main.Contains('displaySource.SourceRect = new ScreenRect(rect.X, rect.Y, rect.Width, rect.Height);')) {
+            throw 'Could not find the region crop assignment to fix.'
+          }
+          $main = $fixedMain
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
-          Write-Host 'Capture API set to DesktopDuplication and main window reduced to 640x700 with 87% layout scale.'
+          Write-Host 'Capture API set to DesktopDuplication; UI reduced to 640x650 at 75%; region crop assigned to DisplayRecordingSource.SourceRect.'
+          Write-Host '===== RegionSelectionWindow.cs ====='
+          $regionPath = Join-Path $root 'RegionSelectionWindow.cs'
+          Get-Content -LiteralPath $regionPath | ForEach-Object { Write-Host $_ }
+          Write-Host '===== MainWindow region/capture lines ====='
+          Select-String -LiteralPath $mainPath -Pattern 'Region|region|SourceRect|Selected|RecorderApi|displaySource|outputOptions|StartRecording|StopRecording' | ForEach-Object { Write-Host ("{0}: {1}" -f $_.LineNumber, $_.Line.Trim()) }
       - name: Resolve WPF and Windows Forms type conflicts
         shell: pwsh
         run: |
