@@ -380,6 +380,7 @@ jobs:
           if (!$main.Contains('private void UpdateSelectedRegion(DrawingRectangle area)')) {
             $main = $main.Insert($startMethod.Index, $helperMethods)
           }
+          $main = [regex]::Replace($main, '(?m)^        SaveSettings\(\);', '        CloseRegionOutline();' + [Environment]::NewLine + '        SaveSettings();')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
@@ -452,8 +453,16 @@ jobs:
           
               public void UpdateArea(DrawingRectangle area)
               {
+                  var sameSize = _area.Width == area.Width && _area.Height == area.Height;
                   _area = area;
-                  if (_ready) ApplyArea();
+                  if (!_ready) return;
+                  if (sameSize)
+                  {
+                      Left = (_area.X - MarginPixels) / _scaleX;
+                      Top = (_area.Y - MarginPixels) / _scaleY;
+                      return;
+                  }
+                  ApplyArea();
               }
           
               private void ApplyArea()
