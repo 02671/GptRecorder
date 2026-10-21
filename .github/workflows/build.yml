@@ -23,15 +23,33 @@ jobs:
           $project = Get-ChildItem -Path .\_src -Filter QingRecorder.csproj -Recurse | Select-Object -First 1
           if (!$project) { throw 'QingRecorder.csproj was not found inside project.zip.' }
           "PROJECT_FILE=$($project.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Inspect capture and layout source
+      - name: Enable Windows 10 1607 capture and compact the UI
         shell: pwsh
         run: |
           $root = Split-Path $env:PROJECT_FILE
-          $patterns = 'RecorderApi|DisplayRecordingSource|WindowRecordingSource|RecordingSources|SourceRect|ScreenRect|Width=|Height=|MinWidth|MinHeight|WindowState|WindowStartupLocation|SizeToContent|ResizeMode|new Recorder|new RecorderOptions|recordSystemAudio|recordMicrophone|LoopbackAudioSource|CaptureAudioSource'
-          Get-ChildItem -Path $root -Recurse -File -Include 'MainWindow.xaml','MainWindow.xaml.cs','RegionSelectionWindow.cs','App.xaml' | ForEach-Object {
-            Write-Host "===== SOURCE: $($_.FullName) ====="
-            Select-String -LiteralPath $_.FullName -Pattern $patterns | ForEach-Object { Write-Host ("{0}:{1}: {2}" -f $_.Path,$_.LineNumber,$_.Line.Trim()) }
+          $xamlPath = Join-Path $root 'MainWindow.xaml'
+          $xaml = Get-Content -LiteralPath $xamlPath -Raw
+          $oldWindowSize = 'Height="790" Width="720" MinHeight="790" MinWidth="720"'
+          if (!$xaml.Contains($oldWindowSize)) { throw 'Could not find the original main-window dimensions.' }
+          $xaml = $xaml.Replace($oldWindowSize, 'Height="700" Width="640" MinHeight="700" MinWidth="640"')
+          $rowToken = '<Grid.RowDefinitions>'
+          $rowIndex = $xaml.IndexOf($rowToken, [StringComparison]::Ordinal)
+          if ($rowIndex -lt 0) { throw 'Could not find the main layout grid.' }
+          if (!$xaml.Contains('<Grid.LayoutTransform>')) {
+            $transform = '<Grid.LayoutTransform><ScaleTransform ScaleX="0.87" ScaleY="0.87" /></Grid.LayoutTransform>' + [Environment]::NewLine + '    '
+            $xaml = $xaml.Insert($rowIndex, $transform)
           }
+          Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
+          $mainPath = Join-Path $root 'MainWindow.xaml.cs'
+          $main = Get-Content -LiteralPath $mainPath -Raw
+          $oldApi = 'displaySource.RecorderApi = RecorderApi.WindowsGraphicsCapture;'
+          if ($main.Contains($oldApi)) {
+            $main = $main.Replace($oldApi, 'displaySource.RecorderApi = RecorderApi.DesktopDuplication;')
+          } elseif (!$main.Contains('displaySource.RecorderApi = RecorderApi.DesktopDuplication;')) {
+            throw 'Could not locate the display capture API assignment.'
+          }
+          Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
+          Write-Host 'Capture API set to DesktopDuplication and main window reduced to 640x700 with 87% layout scale.'
       - name: Resolve WPF and Windows Forms type conflicts
         shell: pwsh
         run: |
