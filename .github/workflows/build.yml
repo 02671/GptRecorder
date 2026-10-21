@@ -49,7 +49,7 @@ jobs:
           <Window x:Class="QingRecorder.MainWindow"
                   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                  Title="轻录屏" Height="66" Width="700" MinHeight="66" MinWidth="700"
+                  Title="轻录屏" Height="58" Width="700" MinHeight="58" MinWidth="700"
                   WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None"
                   Background="#FFFFFF" ShowInTaskbar="True"
                   Loaded="MainWindow_Loaded" SourceInitialized="MainWindow_SourceInitialized" Closing="MainWindow_Closing">
@@ -251,7 +251,7 @@ jobs:
               {
                   var expanded = OptionsPanel.Visibility != Visibility.Visible;
                   OptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-                  Height = expanded ? 200 : 66;
+                  Height = expanded ? 200 : 58;
                   OptionsButton.Content = expanded ? "收起" : "选项";
               }
 
@@ -633,7 +633,7 @@ jobs:
           $region = Get-Content -LiteralPath $regionPath -Raw
           $aliases = "using MouseEventArgs = System.Windows.Input.MouseEventArgs;`nusing KeyEventArgs = System.Windows.Input.KeyEventArgs;`nusing Point = System.Windows.Point;`nusing Color = System.Windows.Media.Color;`nusing Brushes = System.Windows.Media.Brushes;`nusing Cursors = System.Windows.Input.Cursors;`nusing Orientation = System.Windows.Controls.Orientation;"
           $region = $region.Replace('using System.Windows.Input;', "using System.Windows.Input;`n$aliases")
-          $region = $region.Replace('HorizontalAlignment = System.Windows.HorizontalAlignment.Center', 'HorizontalAlignment = System.Windows.HorizontalAlignment.Center')
+          $region = $region.Replace('HorizontalAlignment = HorizontalAlignment.Center', 'HorizontalAlignment = System.Windows.HorizontalAlignment.Center')`n          $region = $region.Replace('VerticalAlignment = VerticalAlignment.Top', 'VerticalAlignment = System.Windows.VerticalAlignment.Top')`n          $region = $region.Replace('VerticalAlignment = VerticalAlignment.Center', 'VerticalAlignment = System.Windows.VerticalAlignment.Center')
           Set-Content -LiteralPath $regionPath -Value $region -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
