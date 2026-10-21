@@ -177,7 +177,7 @@ jobs:
                   </Grid>
               </Grid>
           </Window>
-'@
+          '@
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
