@@ -318,8 +318,14 @@ jobs:
 
               private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
               {
-                  if (e.Key != System.Windows.Input.Key.Escape ||
-                      !_selectedRegionForRecording.HasValue ||
+                  if (e.Key != System.Windows.Input.Key.Escape) return;
+                  CancelSelectedRegion();
+                  e.Handled = true;
+              }
+
+              private void CancelSelectedRegion()
+              {
+                  if (!_selectedRegionForRecording.HasValue ||
                       _isRecording || _isStarting || _isStopping)
                       return;
 
@@ -327,7 +333,6 @@ jobs:
                   CloseRegionOutline();
                   FullScreenRadio.IsChecked = true;
                   SetStatus("已取消区域选择", StatusTone.Ready);
-                  e.Handled = true;
               }
 
               private void ResetRecordingClock()
@@ -361,7 +366,7 @@ jobs:
                   if (_regionMoveHandleWindow == null || !_regionMoveHandleWindow.IsVisible)
                   {
                       _regionMoveHandleWindow?.Close();
-                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion);
+                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, CancelSelectedRegion);
                       _regionMoveHandleWindow.Show();
                   }
                   else
@@ -541,9 +546,10 @@ jobs:
               private const int GwlExStyle = -20;
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
-              private const double HandleWidth = 24.0;
-              private const double HandleHeight = 24.0;
+              private const double HandleWidth = 12.0;
+              private const double HandleHeight = 12.0;
                         private readonly Action<DrawingRectangle> _moveCallback;
+              private readonly Action _cancelCallback;
               private DrawingRectangle _area;
               private DrawingRectangle _dragStartArea;
               private double _dragStartLeft;
@@ -558,10 +564,11 @@ jobs:
               [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
               private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
           
-              public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback)
+              public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback, Action cancelCallback)
               {
                   _area = area;
                   _moveCallback = moveCallback;
+                  _cancelCallback = cancelCallback;
                   WindowStyle = WindowStyle.None;
                   ResizeMode = ResizeMode.NoResize;
                   AllowsTransparency = true;
@@ -581,12 +588,12 @@ jobs:
                       Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
                       BorderBrush = Brushes.White,
                       BorderThickness = new Thickness(1),
-                      CornerRadius = new CornerRadius(12),
+                      CornerRadius = new CornerRadius(6),
                       Cursor = Cursors.SizeAll,
                       Child = new System.Windows.Shapes.Ellipse
                       {
-                          Width = 8,
-                          Height = 8,
+                          Width = 4,
+                          Height = 4,
                           Fill = Brushes.White,
                           HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                           VerticalAlignment = System.Windows.VerticalAlignment.Center
@@ -594,13 +601,14 @@ jobs:
                   };
                   Content = handle;
                   handle.MouseLeftButtonDown += OnHandleMouseDown;
+                  PreviewKeyDown += OnMoveHandlePreviewKeyDown;
                   LocationChanged += OnHandleLocationChanged;
           
                   SourceInitialized += (_, _) =>
                   {
                       var hwnd = new WindowInteropHelper(this).Handle;
                       var exStyle = GetWindowLong(hwnd, GwlExStyle);
-                      SetWindowLong(hwnd, GwlExStyle, exStyle | WsExToolWindow | WsExNoActivate);
+                      SetWindowLong(hwnd, GwlExStyle, (exStyle | WsExToolWindow) & ~WsExNoActivate);
                       var dpi = VisualTreeHelper.GetDpi(this);
                       _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
                       _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
@@ -620,6 +628,13 @@ jobs:
                   Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
               }
           
+              private void OnMoveHandlePreviewKeyDown(object sender, KeyEventArgs e)
+              {
+                  if (e.Key != Key.Escape) return;
+                  _cancelCallback();
+                  e.Handled = true;
+              }
+
               private void OnHandleMouseDown(object sender, MouseButtonEventArgs e)
               {
                   if (e.ChangedButton != MouseButton.Left) return;
@@ -635,6 +650,9 @@ jobs:
                   {
                       _dragging = false;
                       PositionHandle();
+                      Activate();
+                      Focus();
+                      Keyboard.Focus(this);
                   }
                   e.Handled = true;
               }
