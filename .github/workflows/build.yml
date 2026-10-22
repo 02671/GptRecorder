@@ -190,7 +190,7 @@ jobs:
           if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
             $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
             if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
-            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private DisplayRecordingSource? _activeDisplaySource;"
+            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private DisplayRecordingSource? _activeDisplaySource;`r`n    private bool _discardRecordingOnComplete;"
             $main = $main.Insert($classForState.Index + $classForState.Length, $stateFields)
           }
           $oldRegionFlow = '(?s)DrawingRectangle\? selectedRegion = null;\s*if \(RegionRadio\.IsChecked == true\)\s*\{\s*ShowInTaskbar = true;.*?selectedRegion = selector\.SelectedArea;\s*\}'
@@ -360,6 +360,13 @@ jobs:
                   RecordButton_Click(this, new RoutedEventArgs());
               }
 
+              private void CancelRegionRecordingWithoutSaving()
+              {
+                  if (!_selectedRegionForRecording.HasValue || !_isRecording || _isStarting || _isStopping) return;
+                  _discardRecordingOnComplete = true;
+                  StopRegionRecordingFromOverlay();
+              }
+
               private void ResetRecordingClock()
               {
                   _clock.Stop();
@@ -391,7 +398,7 @@ jobs:
                   if (_regionMoveHandleWindow == null || !_regionMoveHandleWindow.IsVisible)
                   {
                       _regionMoveHandleWindow?.Close();
-                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, StartRegionRecordingFromOverlay, StopRegionRecordingFromOverlay, CancelSelectedRegion, () => _isRecording, () => _isStarting || _isStopping, () => _selectedRegionForRecording.HasValue);
+                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, StartRegionRecordingFromOverlay, StopRegionRecordingFromOverlay, CancelRegionRecordingWithoutSaving, CancelSelectedRegion, () => _isRecording, () => _isStarting || _isStopping, () => _selectedRegionForRecording.HasValue);
                       _regionMoveHandleWindow.Show();
                   }
                   else
@@ -450,8 +457,8 @@ jobs:
           if ($lineStart -lt 0) { $lineStart = 0 } else { $lineStart++ }
           $indent = [regex]::Match($main.Substring($lineStart, $recordMatch.Index - $lineStart), '^\s*').Value
           $recordHooks = @"
-          ${indent}$recordObject.OnRecordingComplete += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(ResetRecordingClock));
-          ${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(ResetRecordingClock));
+          ${indent}$recordObject.OnRecordingComplete += (_, args) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(() => { ResetRecordingClock(); if (!_discardRecordingOnComplete) return; try { var canceledPath = args.FilePath; if (!string.IsNullOrWhiteSpace(canceledPath) && System.IO.File.Exists(canceledPath)) System.IO.File.Delete(canceledPath); LatestFileText.Text = "最近录制：已取消（未保存）"; LatestFileText.Visibility = Visibility.Visible; SetStatus("录制已取消，视频未保存", StatusTone.Ready); } catch (Exception ex) { SetStatus("无法删除取消的视频", StatusTone.Error); MessageBox.Show(this, "取消录制时无法删除视频：" + ex.Message, "轻录屏", MessageBoxButton.OK, MessageBoxImage.Error); } finally { _discardRecordingOnComplete = false; } }));
+          ${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(() => { ResetRecordingClock(); if (_discardRecordingOnComplete) { _discardRecordingOnComplete = false; LatestFileText.Text = "最近录制：录制已取消"; LatestFileText.Visibility = Visibility.Visible; SetStatus("录制已取消，视频未保存", StatusTone.Ready); } }));
           "@
           if (!$main.Contains('new System.Action(ResetRecordingClock)')) {
             $main = $main.Insert($lineStart, $recordHooks + "`r`n")
@@ -600,17 +607,19 @@ jobs:
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
               private const double ToolbarWidth = 318.0;
-              private const double ToolbarHeight = 44.0;
+              private const double ToolbarHeight = 40.0;
               private const double ToolbarGap = 7.0;
               private readonly Action<DrawingRectangle> _moveCallback;
               private readonly Action _startCallback;
               private readonly Action _stopCallback;
+              private readonly Action _discardCallback;
               private readonly Action _cancelCallback;
               private readonly Func<bool> _isRecording;
               private readonly Func<bool> _isBusy;
               private readonly Func<bool> _hasSelection;
               private readonly Button _startButton;
               private readonly Button _stopButton;
+              private readonly Button _discardButton;
               private readonly Button _cancelButton;
               private readonly DispatcherTimer _stateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
               private DrawingRectangle _area;
@@ -632,6 +641,7 @@ jobs:
                   Action<DrawingRectangle> moveCallback,
                   Action startCallback,
                   Action stopCallback,
+                  Action discardCallback,
                   Action cancelCallback,
                   Func<bool> isRecording,
                   Func<bool> isBusy,
@@ -641,6 +651,7 @@ jobs:
                   _moveCallback = moveCallback;
                   _startCallback = startCallback;
                   _stopCallback = stopCallback;
+                  _discardCallback = discardCallback;
                   _cancelCallback = cancelCallback;
                   _isRecording = isRecording;
                   _isBusy = isBusy;
@@ -660,43 +671,44 @@ jobs:
           
                   var moveGrip = new Border
                   {
-                      Width = 62,
-                      Height = 30,
-                      Margin = new Thickness(0, 0, 6, 0),
-                      Padding = new Thickness(8, 3, 8, 3),
+                      Width = 54,
+                      Height = 25,
+                      Margin = new Thickness(0),
+                      Padding = new Thickness(5, 2, 5, 2),
                       Background = new SolidColorBrush(Color.FromRgb(238, 244, 255)),
                       BorderBrush = new SolidColorBrush(Color.FromRgb(211, 225, 252)),
                       BorderThickness = new Thickness(1),
                       CornerRadius = new CornerRadius(7),
-                      Cursor = Cursors.SizeAll,
-                      ToolTip = "拖动这里可移动整个录制区域"
+                      Cursor = Cursors.SizeAll
                   };
                   var moveContent = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Center, VerticalAlignment = System.Windows.VerticalAlignment.Center };
-                  moveContent.Children.Add(new TextBlock { Text = "✥", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
-                  moveContent.Children.Add(new TextBlock { Text = "移动", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center });
+                  moveContent.Children.Add(new TextBlock { Text = "✥", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 3, 0) });
+                  moveContent.Children.Add(new TextBlock { Text = "移动", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center });
                   moveGrip.Child = moveContent;
                   moveGrip.MouseLeftButtonDown += OnHandleMouseDown;
           
-                  _startButton = CreateActionButton("开始录制", 76,
-                      Color.FromRgb(234, 249, 240), Color.FromRgb(197, 234, 212), Color.FromRgb(24, 117, 72), 5);
-                  _startButton.ToolTip = "开始录制当前选区";
+                  _startButton = CreateActionButton("开始录制", 58,
+                      Color.FromRgb(234, 249, 240), Color.FromRgb(197, 234, 212), Color.FromRgb(24, 117, 72), 3);
                   _startButton.Click += (_, _) => _startCallback();
           
-                  _stopButton = CreateActionButton("结束录制", 76,
-                      Color.FromRgb(255, 240, 239), Color.FromRgb(248, 208, 204), Color.FromRgb(185, 56, 56), 5);
-                  _stopButton.ToolTip = "结束并保存当前录制";
+                  _stopButton = CreateActionButton("结束录制", 58,
+                      Color.FromRgb(255, 240, 239), Color.FromRgb(248, 208, 204), Color.FromRgb(185, 56, 56), 3);
                   _stopButton.Click += (_, _) => _stopCallback();
           
-                  _cancelButton = CreateActionButton("取消选区", 66,
-                      Color.FromRgb(246, 248, 251), Color.FromRgb(220, 228, 239), Color.FromRgb(71, 85, 105), 0);
-                  _cancelButton.ToolTip = "取消当前选区并关闭边框";
+                  _discardButton = CreateActionButton("取消录制", 58,
+                      Color.FromRgb(255, 248, 230), Color.FromRgb(246, 226, 168), Color.FromRgb(150, 91, 12), 3);
+                  _discardButton.Click += (_, _) => _discardCallback();
+          
+                  _cancelButton = CreateActionButton("取消选区", 58,
+                      Color.FromRgb(246, 248, 251), Color.FromRgb(220, 228, 239), Color.FromRgb(71, 85, 105), 3);
                   _cancelButton.Click += (_, _) => _cancelCallback();
           
                   var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-                  row.Children.Add(moveGrip);
                   row.Children.Add(_startButton);
                   row.Children.Add(_stopButton);
+                  row.Children.Add(_discardButton);
                   row.Children.Add(_cancelButton);
+                  row.Children.Add(moveGrip);
           
                   var surface = new Border
                   {
@@ -738,10 +750,10 @@ jobs:
                   {
                       Content = text,
                       Width = width,
-                      Height = 30,
+                      Height = 25,
                       Margin = new Thickness(0, 0, rightMargin, 0),
-                      Padding = new Thickness(5, 3, 5, 3),
-                      FontSize = 12,
+                      Padding = new Thickness(3, 2, 3, 2),
+                      FontSize = 10.5,
                       FontWeight = FontWeights.SemiBold,
                       Foreground = new SolidColorBrush(foreground),
                       Background = new SolidColorBrush(background),
@@ -750,8 +762,7 @@ jobs:
                       Cursor = Cursors.Hand,
                       Focusable = true,
                       HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center,
-                      VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
-                      ToolTip = text
+                      VerticalContentAlignment = System.Windows.VerticalAlignment.Center
                   };
               }
 
@@ -762,6 +773,7 @@ jobs:
                   var selected = _hasSelection();
                   _startButton.IsEnabled = selected && !recording && !busy;
                   _stopButton.IsEnabled = selected && recording && !busy;
+                  _discardButton.IsEnabled = selected && recording && !busy;
                   _cancelButton.IsEnabled = selected && !recording && !busy;
               }
           
@@ -780,14 +792,10 @@ jobs:
                   var left = _area.X + _area.Width - widthPixels;
                   left = Math.Clamp(left, bounds.Left, Math.Max(bounds.Left, bounds.Right - widthPixels));
           
-                  var top = _area.Y - heightPixels - ToolbarGap;
-                  if (top < bounds.Top)
-                  {
-                      var below = _area.Y + _area.Height + ToolbarGap;
-                      top = below + heightPixels <= bounds.Bottom
-                          ? below
-                          : _area.Y - heightPixels - ToolbarGap;
-                  }
+                  var below = _area.Y + _area.Height + ToolbarGap;
+                  var top = below + heightPixels <= bounds.Bottom
+                      ? below
+                      : _area.Y - heightPixels - ToolbarGap;
                   top = Math.Clamp(top, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - heightPixels));
           
                   Left = left / _scaleX;
