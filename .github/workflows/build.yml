@@ -198,12 +198,13 @@ jobs:
               </Grid>
           </Window>
           '@
+          $xaml = [regex]::Replace($xaml, '(?s)\s*<TextBlock Text="全局快捷键".*?<TextBlock x:Name="HotkeyHintText".*?</StackPanel>', '')
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
           if (!$main.Contains('Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0;')) {
             if (!$main.Contains('InitializeComponent();')) { throw 'Could not find MainWindow InitializeComponent for startup placement.' }
-            $main = $main.Replace('InitializeComponent();', 'InitializeComponent();' + [Environment]::NewLine + '        WindowStartupLocation = WindowStartupLocation.Manual;' + [Environment]::NewLine + '        Loaded += (_, _) => { Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0; };' + [Environment]::NewLine + '        SourceInitialized += (_, _) => { LoadShortcutSettings(); RegisterShortcutHotkeys(); };' + [Environment]::NewLine + '        Closing += (_, _) => UnregisterShortcutHotkeys();')
+            $main = $main.Replace('InitializeComponent();', 'InitializeComponent();' + [Environment]::NewLine + '        WindowStartupLocation = WindowStartupLocation.Manual;' + [Environment]::NewLine + '        Loaded += (_, _) => { Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0; };')
           }
           $main = $main.Replace('FpsCombo.SelectedIndex = _settings.FrameRate == 60 ? 1 : 0;', 'FpsCombo.SelectedIndex = _settings.FrameRate == 15 ? 0 : _settings.FrameRate == 60 ? 2 : 1;')
           $main = $main.Replace('Framerate = FpsCombo.SelectedIndex == 1 ? 60 : 30,', 'Framerate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30,')
@@ -542,7 +543,7 @@ jobs:
           if (!$main.Contains('private void UpdateSelectedRegion(DrawingRectangle area)')) {
             $main = $main.Insert($startMethod.Index, $helperMethods)
           }
-          if (!$main.Contains('private void LoadShortcutSettings()')) {
+          if ($false) { # Global custom hotkeys intentionally disabled until reliable support is implemented.
             $hotkeyMethods = @'
               private string ShortcutSettingsPath()
               {
@@ -821,6 +822,15 @@ jobs:
             $main = $main.Insert($clockMethod.Index + $clockMethod.Length, [Environment]::NewLine + '        if (_isPaused) return;')
           }
           $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'elapsed = _activeRecordingClock.Elapsed;' + [Environment]::NewLine + '        StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+          # Remove the unsupported custom/global hotkey feature completely.
+          $main = [regex]::Replace($main, '(?s)\s*private System\.Windows\.Interop\.HwndSource\?\s*_shortcutHwndSource;.*?private static extern bool AppUnregisterHotKey\([^;]+;', '')
+          $main = [regex]::Replace($main, '(?m)^\s*SourceInitialized \+= \(_, _\) => \{ LoadShortcutSettings\(\); RegisterShortcutHotkeys\(\); \};\r?\n?', '')
+          $main = [regex]::Replace($main, '(?m)^\s*Closing \+= \(_, _\) => UnregisterShortcutHotkeys\(\);\r?\n?', '')
+          $main = $main.Replace('        StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);', '        StatusText.Text = "录制中";')
+          $main = $main.Replace('SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);', 'SetStatus("录制中", StatusTone.Recording);')
+          $main = $main.Replace('SetStatus("录制已暂停 · 继续 " + FormatShortcut(1), StatusTone.Busy);', 'SetStatus("录制已暂停", StatusTone.Busy);')
+          $main = $main.Replace('if (Keyboard.FocusedElement is TextBox hotkeyBox && (hotkeyBox.Name == "RecordHotkeyBox" || hotkeyBox.Name == "PauseHotkeyBox" || hotkeyBox.Name == "StopHotkeyBox" || hotkeyBox.Name == "CancelHotkeyBox")) return;', '')
+          if ($main.Contains('LoadShortcutSettings()') -or $main.Contains('RegisterShortcutHotkeys()') -or $main.Contains('FormatShortcut(') -or $main.Contains('RecordHotkeyBox') -or $main.Contains('AppRegisterHotKey')) { throw 'Custom hotkey removal incomplete.' }
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
