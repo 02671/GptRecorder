@@ -804,6 +804,8 @@ jobs:
           using RelativeSource = System.Windows.Data.RelativeSource;
           using RelativeSourceMode = System.Windows.Data.RelativeSourceMode;
           using Cursors = System.Windows.Input.Cursors;
+          using Cursor = System.Windows.Input.Cursor;
+          using MouseEventArgs = System.Windows.Input.MouseEventArgs;
           using KeyEventArgs = System.Windows.Input.KeyEventArgs;
           using System.Windows.Input;
           using System.Windows.Interop;
