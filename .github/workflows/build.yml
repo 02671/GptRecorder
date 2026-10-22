@@ -843,7 +843,7 @@ jobs:
               }
           }
           
-          '@          '@
+          '@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
           Write-Host 'Compact borderless toolbar built; region outline and draggable move handle stay visible; region updates are applied dynamically during recording.'
           Write-Host '===== RegionSelectionWindow.cs ====='
