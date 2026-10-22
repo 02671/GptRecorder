@@ -314,7 +314,7 @@ jobs:
           }
           $oldClockLine = 'StatusText.Text = $"录制中 · {elapsed:hh\\:mm\\:ss}";'
           if ($main.Contains($oldClockLine)) {
-            $main = $main.Replace($oldClockLine, 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+            $main = $main.Replace($oldClockLine, 'StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           } elseif (!$main.Contains('TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')) {
             throw 'Could not locate UpdateRecordingClock text to separate the timer display.'
           }
@@ -385,16 +385,50 @@ jobs:
 
               private void CancelRegionRecordingWithoutSaving()
               {
-                  if (!_selectedRegionForRecording.HasValue || !_isRecording || _isStarting || _isStopping) return;
+                  if (!_isRecording || _isStarting || _isStopping) return;
                   _discardRecordingOnComplete = true;
-                  StopRegionRecordingFromOverlay();
+                  RecordButton_Click(this, new RoutedEventArgs());
+              }
+
+              private void PauseButton_Click(object sender, RoutedEventArgs e)
+              {
+                  if (!_isRecording || _isStarting || _isStopping || _recorder == null) return;
+                  try
+                  {
+                      if (_isPaused)
+                      {
+                          _recorder.Resume();
+                          _isPaused = false;
+                          _clock.Start();
+                          PauseButton.Content = "暂停";
+                          SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);
+                      }
+                      else
+                      {
+                          _recorder.Pause();
+                          _isPaused = true;
+                          _clock.Stop();
+                          PauseButton.Content = "继续";
+                          SetStatus("录制已暂停 · 继续 " + FormatShortcut(1), StatusTone.Busy);
+                      }
+                      _regionMoveHandleWindow?.RefreshActionState();
+                  }
+                  catch (Exception ex)
+                  {
+                      SetStatus("暂停操作失败", StatusTone.Error);
+                      MessageBox.Show(this, "暂停或继续录制失败：" + ex.Message, "录屏", MessageBoxButton.OK, MessageBoxImage.Error);
+                  }
               }
 
               private void ResetRecordingClock()
               {
                   _clock.Stop();
+                  _isPaused = false;
+                  PauseButton.Content = "暂停";
+                  PauseButton.IsEnabled = false;
                   TimerText.Text = "00:00:00";
                   _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);
+                  _regionMoveHandleWindow?.RefreshActionState();
               }
 
               private void FullScreenRadio_Click(object sender, RoutedEventArgs e)
@@ -429,13 +463,28 @@ jobs:
                   {
                       _regionMoveHandleWindow.UpdateArea(area);
                   }
+
+                  if (_regionResizeHandles == null)
+                  {
+                      _regionResizeHandles = new RegionResizeHandlesController(area, UpdateSelectedRegion);
+                  }
+                  else
+                  {
+                      _regionResizeHandles.UpdateArea(area, null);
+                  }
               }
 
               private void UpdateSelectedRegion(DrawingRectangle area)
               {
+                  UpdateSelectedRegion(area, null);
+              }
+
+              private void UpdateSelectedRegion(DrawingRectangle area, RegionResizeEdge? activeResizeEdge)
+              {
                   _selectedRegionForRecording = area;
                   _regionOutlineWindow?.UpdateArea(area);
                   _regionMoveHandleWindow?.UpdateArea(area);
+                  _regionResizeHandles?.UpdateArea(area, activeResizeEdge);
 
                   if (!_isRecording || _recorder == null || _activeDisplaySource == null) return;
                   try
@@ -445,16 +494,21 @@ jobs:
                           .SetUpdatedRecordingSource(_activeDisplaySource)
                           .Apply();
                       if (!applied)
-                          SetStatus("区域位置暂未应用，请稍后重试", StatusTone.Busy);
+                          SetStatus("区域更新失败，请重试", StatusTone.Busy);
                   }
                   catch
                   {
-                      SetStatus("区域位置更新失败", StatusTone.Error);
+                      SetStatus("区域更新失败，请重试", StatusTone.Error);
                   }
               }
 
               private void CloseRegionOutline()
               {
+                  if (_regionResizeHandles != null)
+                  {
+                      _regionResizeHandles.Close();
+                      _regionResizeHandles = null;
+                  }
                   if (_regionMoveHandleWindow != null)
                   {
                       _regionMoveHandleWindow.Close();
@@ -472,6 +526,221 @@ jobs:
           if (!$startMethod.Success) { throw 'Could not find StartRecordingAsync to insert region outline helpers.' }
           if (!$main.Contains('private void UpdateSelectedRegion(DrawingRectangle area)')) {
             $main = $main.Insert($startMethod.Index, $helperMethods)
+          }
+          if (!$main.Contains('private void LoadShortcutSettings()')) {
+            $hotkeyMethods = @'
+              private string ShortcutSettingsPath()
+              {
+                  return System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "录屏", "hotkeys.ini");
+              }
+
+              private void LoadShortcutSettings()
+              {
+                  try
+                  {
+                      var path = ShortcutSettingsPath();
+                      if (System.IO.File.Exists(path))
+                      {
+                          var lines = System.IO.File.ReadAllLines(path);
+                          for (var i = 0; i < 4 && i < lines.Length; i++)
+                          {
+                              var parts = lines[i].Split(',');
+                              if (parts.Length == 2 &&
+                                  int.TryParse(parts[0], out var modifiers) &&
+                                  int.TryParse(parts[1], out var virtualKey) &&
+                                  modifiers >= 0 && modifiers <= 15 &&
+                                  virtualKey > 0 && virtualKey <= 255)
+                              {
+                                  _shortcutModifiers[i] = modifiers;
+                                  _shortcutKeys[i] = virtualKey;
+                              }
+                          }
+                      }
+                  }
+                  catch { }
+                  UpdateShortcutTextBoxes();
+                  UpdateHotkeyHintText();
+              }
+
+              private void SaveShortcutSettings()
+              {
+                  try
+                  {
+                      var path = ShortcutSettingsPath();
+                      System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+                      var lines = new string[4];
+                      for (var i = 0; i < 4; i++)
+                          lines[i] = _shortcutModifiers[i].ToString() + "," + _shortcutKeys[i].ToString();
+                      System.IO.File.WriteAllLines(path, lines);
+                  }
+                  catch (Exception ex)
+                  {
+                      HotkeyHintText.Text = "无法保存快捷键设置：" + ex.Message;
+                  }
+              }
+
+              private string FormatShortcut(int index)
+              {
+                  var parts = new System.Collections.Generic.List<string>();
+                  var mods = _shortcutModifiers[index];
+                  if ((mods & 2) != 0) parts.Add("Ctrl");
+                  if ((mods & 1) != 0) parts.Add("Alt");
+                  if ((mods & 4) != 0) parts.Add("Shift");
+                  if ((mods & 8) != 0) parts.Add("Win");
+                  var key = System.Windows.Input.KeyInterop.KeyFromVirtualKey(_shortcutKeys[index]);
+                  parts.Add(key == System.Windows.Input.Key.None ? "VK" + _shortcutKeys[index].ToString() : key.ToString());
+                  return string.Join("+", parts);
+              }
+
+              private void UpdateShortcutTextBoxes()
+              {
+                  RecordHotkeyBox.Text = FormatShortcut(0);
+                  PauseHotkeyBox.Text = FormatShortcut(1);
+                  StopHotkeyBox.Text = FormatShortcut(2);
+                  CancelHotkeyBox.Text = FormatShortcut(3);
+              }
+
+              private void UpdateHotkeyHintText()
+              {
+                  HotkeyHintText.Text = "全局快捷键：录制 " + FormatShortcut(0) +
+                      " · 暂停/继续 " + FormatShortcut(1) +
+                      " · 结束并保存 " + FormatShortcut(2) +
+                      " · 取消且不保存 " + FormatShortcut(3);
+              }
+
+              private void RegisterShortcutHotkeys()
+              {
+                  try
+                  {
+                      var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                      if (handle == System.IntPtr.Zero) return;
+                      if (_shortcutHwndSource == null)
+                      {
+                          _shortcutHwndSource = System.Windows.Interop.HwndSource.FromHwnd(handle);
+                          _shortcutHwndSource?.AddHook(ShortcutWindowProc);
+                      }
+
+                      for (var i = 1; i <= 4; i++) AppUnregisterHotKey(handle, i);
+                      var failed = new System.Collections.Generic.List<string>();
+                      for (var i = 0; i < 4; i++)
+                      {
+                          var ok = AppRegisterHotKey(handle, i + 1, (uint)(_shortcutModifiers[i] | 0x4000), (uint)_shortcutKeys[i]);
+                          if (!ok) failed.Add(new string[] { "录制", "暂停", "结束", "取消" }[i] + " " + FormatShortcut(i));
+                      }
+
+                      UpdateHotkeyHintText();
+                      if (failed.Count > 0)
+                          HotkeyHintText.Text += "；注册失败（可能被系统或其他程序占用）：" + string.Join("、", failed);
+                  }
+                  catch (Exception ex)
+                  {
+                      HotkeyHintText.Text = "全局快捷键初始化失败：" + ex.Message;
+                  }
+              }
+
+              private void UnregisterShortcutHotkeys()
+              {
+                  try
+                  {
+                      var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                      if (handle != System.IntPtr.Zero)
+                          for (var i = 1; i <= 4; i++) AppUnregisterHotKey(handle, i);
+                  }
+                  catch { }
+                  _shortcutHwndSource?.RemoveHook(ShortcutWindowProc);
+                  _shortcutHwndSource = null;
+              }
+
+              private System.IntPtr ShortcutWindowProc(System.IntPtr hwnd, int msg, System.IntPtr wParam, System.IntPtr lParam, ref bool handled)
+              {
+                  if (msg != ShortcutMessageId) return System.IntPtr.Zero;
+                  HandleGlobalShortcut(wParam.ToInt32());
+                  handled = true;
+                  return System.IntPtr.Zero;
+              }
+
+              private void HandleGlobalShortcut(int id)
+              {
+                  switch (id)
+                  {
+                      case 1:
+                          if (!_isRecording && !_isStarting && !_isStopping)
+                              RecordButton_Click(this, new RoutedEventArgs());
+                          break;
+                      case 2:
+                          PauseButton_Click(this, new RoutedEventArgs());
+                          break;
+                      case 3:
+                          if (_isRecording && !_isStarting && !_isStopping)
+                              RecordButton_Click(this, new RoutedEventArgs());
+                          break;
+                      case 4:
+                          CancelRegionRecordingWithoutSaving();
+                          break;
+                  }
+              }
+
+              private void HotkeyTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+              {
+                  if (!(sender is TextBox box)) return;
+                  var key = e.Key == System.Windows.Input.Key.System ? e.SystemKey : e.Key;
+                  if (key == System.Windows.Input.Key.Escape)
+                  {
+                      Keyboard.ClearFocus();
+                      e.Handled = true;
+                      UpdateShortcutTextBoxes();
+                      return;
+                  }
+                  if (key == System.Windows.Input.Key.LeftCtrl || key == System.Windows.Input.Key.RightCtrl ||
+                      key == System.Windows.Input.Key.LeftAlt || key == System.Windows.Input.Key.RightAlt ||
+                      key == System.Windows.Input.Key.LeftShift || key == System.Windows.Input.Key.RightShift ||
+                      key == System.Windows.Input.Key.LWin || key == System.Windows.Input.Key.RWin)
+                  {
+                      e.Handled = true;
+                      return;
+                  }
+
+                  var modifiers = 0;
+                  var keyboardModifiers = System.Windows.Input.Keyboard.Modifiers;
+                  if ((keyboardModifiers & System.Windows.Input.ModifierKeys.Control) != 0) modifiers |= 2;
+                  if ((keyboardModifiers & System.Windows.Input.ModifierKeys.Alt) != 0) modifiers |= 1;
+                  if ((keyboardModifiers & System.Windows.Input.ModifierKeys.Shift) != 0) modifiers |= 4;
+                  if ((keyboardModifiers & System.Windows.Input.ModifierKeys.Windows) != 0) modifiers |= 8;
+                  var virtualKey = System.Windows.Input.KeyInterop.VirtualKeyFromKey(key);
+                  var index = box.Name == "RecordHotkeyBox" ? 0 :
+                              box.Name == "PauseHotkeyBox" ? 1 :
+                              box.Name == "StopHotkeyBox" ? 2 : 3;
+
+                  if (modifiers == 0 || virtualKey <= 0)
+                  {
+                      HotkeyHintText.Text = "请按组合键设置快捷键，至少包含 Ctrl、Alt、Shift 或 Win 中的一个修饰键。";
+                      e.Handled = true;
+                      return;
+                  }
+                  for (var i = 0; i < 4; i++)
+                  {
+                      if (i != index && _shortcutModifiers[i] == modifiers && _shortcutKeys[i] == virtualKey)
+                      {
+                          HotkeyHintText.Text = "快捷键重复，请为每个操作设置不同的组合键。";
+                          e.Handled = true;
+                          return;
+                      }
+                  }
+
+                  _shortcutModifiers[index] = modifiers;
+                  _shortcutKeys[index] = virtualKey;
+                  UpdateShortcutTextBoxes();
+                  SaveShortcutSettings();
+                  RegisterShortcutHotkeys();
+                  SetStatus("快捷键已更新", StatusTone.Ready);
+                  e.Handled = true;
+              }
+
+
+          '@
+            $startMethod = [regex]::Match($main, '(?m)^\s*private async Task StartRecordingAsync\s*\(')
+            if (!$startMethod.Success) { throw 'Could not find StartRecordingAsync to insert shortcut handlers.' }
+            $main = $main.Insert($startMethod.Index, $hotkeyMethods)
           }
           $main = [regex]::Replace($main, '(?m)^        SaveSettings\(\);', '        CloseRegionOutline();' + [Environment]::NewLine + '        SaveSettings();')
           $recordMatch = [regex]::Match($main, '(?<object>[A-Za-z_]\w*)\.Record\s*\(')
@@ -508,7 +777,7 @@ jobs:
           foreach ($oldText in $statusReplacements.Keys) {
             $main = $main.Replace($oldText, $statusReplacements[$oldText])
           }
-          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
