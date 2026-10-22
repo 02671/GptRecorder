@@ -236,7 +236,19 @@ jobs:
                           return;
                       }
                       _selectedRegionForRecording = selector.SelectedArea;
-                      ShowRegionOutline(selector.SelectedArea.Value);
+                      try
+                      {
+                          ShowRegionOutline(selector.SelectedArea.Value);
+                      }
+                      catch (Exception ex)
+                      {
+                          _selectedRegionForRecording = null;
+                          CloseRegionOutline();
+                          FullScreenRadio.IsChecked = true;
+                          SetStatus("区域工具加载失败", StatusTone.Error);
+                          MessageBox.Show(this, $"区域工具加载失败：{ex.Message}", "轻录屏", MessageBoxButton.OK, MessageBoxImage.Error);
+                          return;
+                      }
                       Activate();
                       System.Windows.Input.Keyboard.Focus(RegionRadio);
                       SetStatus("已选择区域，可拖动右上角圆点调整位置，Esc 取消区域", StatusTone.Ready);
@@ -694,13 +706,6 @@ jobs:
                       CornerRadius = new CornerRadius(10),
                       Padding = new Thickness(6, 5, 6, 5),
                       Child = row,
-                      Effect = new System.Windows.Media.Effects.DropShadowEffect
-                      {
-                          Color = Color.FromRgb(37, 52, 79),
-                          BlurRadius = 14,
-                          ShadowDepth = 2,
-                          Opacity = 0.18
-                      }
                   };
                   Content = surface;
           
@@ -729,7 +734,7 @@ jobs:
           
               private static Button CreateActionButton(string text, double width, Color background, Color border, Color foreground, double rightMargin)
               {
-                  var button = new Button
+                  return new Button
                   {
                       Content = text,
                       Width = width,
@@ -743,26 +748,13 @@ jobs:
                       BorderBrush = new SolidColorBrush(border),
                       BorderThickness = new Thickness(1),
                       Cursor = Cursors.Hand,
-                      Focusable = true
+                      Focusable = true,
+                      HorizontalContentAlignment = System.Windows.HorizontalAlignment.Center,
+                      VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
+                      ToolTip = text
                   };
-                  var shell = new FrameworkElementFactory(typeof(Border), "ButtonShell");
-                  var templatedParent = new RelativeSource(RelativeSourceMode.TemplatedParent);
-                  shell.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding(nameof(Control.Background)) { RelativeSource = templatedParent });
-                  shell.SetBinding(Border.BorderBrushProperty, new System.Windows.Data.Binding(nameof(Control.BorderBrush)) { RelativeSource = templatedParent });
-                  shell.SetBinding(Border.BorderThicknessProperty, new System.Windows.Data.Binding(nameof(Control.BorderThickness)) { RelativeSource = templatedParent });
-                  shell.SetBinding(Border.PaddingProperty, new System.Windows.Data.Binding(nameof(Control.Padding)) { RelativeSource = templatedParent });
-                  shell.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
-                  var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-                  presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, System.Windows.HorizontalAlignment.Center);
-                  presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, System.Windows.VerticalAlignment.Center);
-                  shell.AppendChild(presenter);
-                  button.Template = new ControlTemplate(typeof(Button)) { VisualTree = shell };
-                  var disabledTrigger = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
-                  disabledTrigger.Setters.Add(new Setter(UIElement.OpacityProperty, 0.42, "ButtonShell"));
-                  button.Template.Triggers.Add(disabledTrigger);
-                  return button;
               }
-          
+
               private void RefreshActionState()
               {
                   var recording = _isRecording();
