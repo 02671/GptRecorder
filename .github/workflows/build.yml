@@ -135,7 +135,8 @@ jobs:
                           <RadioButton x:Name="FullScreenRadio" Style="{StaticResource ModeRadio}" Click="FullScreenRadio_Click" GroupName="CaptureMode" IsChecked="True" Content="全屏"/>
                           <RadioButton x:Name="RegionRadio" Style="{StaticResource ModeRadio}" Click="RegionRadio_Click" GroupName="CaptureMode" Content="区域"/>
                           <Border Width="1" Height="28" Background="#E1E7F0" Margin="2,0,8,0"/>
-                          <Button x:Name="RecordButton" Style="{StaticResource ActionButton}" MinWidth="96" Margin="0,0,6,0" Content="开始录制" Click="RecordButton_Click"/>
+                          <Button x:Name="RecordButton" Style="{StaticResource ActionButton}" MinWidth="62" Margin="0,0,6,0" Content="录制" Click="RecordButton_Click"/>
+                          <Button x:Name="PauseButton" Style="{StaticResource ActionButton}" MinWidth="62" Margin="0,0,6,0" Content="暂停" Click="PauseButton_Click" IsEnabled="False"/>
                           <Button Style="{StaticResource ActionButton}" Content="打开目录" Click="OpenFolder_Click"/>
                           <Button x:Name="OptionsButton" Style="{StaticResource ActionButton}" Content="选项" Click="OptionsButton_Click"/>
                           <Border Background="#F0FDF4" BorderBrush="#D4F4DF" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,10,0" VerticalAlignment="Center">
@@ -174,6 +175,22 @@ jobs:
                                   <TextBox x:Name="OutputPathText" Grid.Column="1" Height="30" VerticalContentAlignment="Center" Padding="8,3" BorderBrush="#D8E1ED" Background="#FBFCFE" FontSize="12" Margin="0,0,8,0"/>
                                   <Button Grid.Column="2" Style="{StaticResource ActionButton}" Content="选择文件夹" Click="BrowseFolder_Click" Margin="0" Height="30" VerticalAlignment="Center"/>
                               </Grid>
+                              <TextBlock Text="全局快捷键" FontSize="12" FontWeight="SemiBold" Foreground="#334155" Margin="0,12,0,6"/>
+                              <StackPanel Orientation="Vertical">
+                                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,5">
+                                      <TextBlock Text="录制" Width="42" FontSize="12" Foreground="#64748B" VerticalAlignment="Center"/>
+                                      <TextBox x:Name="RecordHotkeyBox" Width="104" Height="27" Margin="0,0,14,0" IsReadOnly="True" Text="Ctrl+Alt+R" ToolTip="点击此处，然后按下要设置的组合键" PreviewKeyDown="HotkeyTextBox_PreviewKeyDown" FontSize="12" Padding="6,3"/>
+                                      <TextBlock Text="暂停/继续" Width="62" FontSize="12" Foreground="#64748B" VerticalAlignment="Center"/>
+                                      <TextBox x:Name="PauseHotkeyBox" Width="104" Height="27" IsReadOnly="True" Text="Ctrl+Alt+P" ToolTip="点击此处，然后按下要设置的组合键" PreviewKeyDown="HotkeyTextBox_PreviewKeyDown" FontSize="12" Padding="6,3"/>
+                                  </StackPanel>
+                                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,5">
+                                      <TextBlock Text="结束" Width="42" FontSize="12" Foreground="#64748B" VerticalAlignment="Center"/>
+                                      <TextBox x:Name="StopHotkeyBox" Width="104" Height="27" Margin="0,0,14,0" IsReadOnly="True" Text="Ctrl+Alt+S" ToolTip="点击此处，然后按下要设置的组合键" PreviewKeyDown="HotkeyTextBox_PreviewKeyDown" FontSize="12" Padding="6,3"/>
+                                      <TextBlock Text="取消" Width="62" FontSize="12" Foreground="#64748B" VerticalAlignment="Center"/>
+                                      <TextBox x:Name="CancelHotkeyBox" Width="104" Height="27" IsReadOnly="True" Text="Ctrl+Alt+X" ToolTip="点击此处，然后按下要设置的组合键" PreviewKeyDown="HotkeyTextBox_PreviewKeyDown" FontSize="12" Padding="6,3"/>
+                                  </StackPanel>
+                                  <TextBlock x:Name="HotkeyHintText" Text="点击快捷键输入框后按组合键；快捷键在全局生效。" FontSize="11" Foreground="#718096" TextWrapping="Wrap" MaxWidth="560" Margin="0,2,0,0"/>
+                              </StackPanel>
                               <TextBlock x:Name="LatestFileText" Text="" Visibility="Collapsed" Width="0" Height="0"/>
                           </StackPanel>
                       </Border>
@@ -186,7 +203,8 @@ jobs:
           $main = Get-Content -LiteralPath $mainPath -Raw
           if (!$main.Contains('Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0;')) {
             if (!$main.Contains('InitializeComponent();')) { throw 'Could not find MainWindow InitializeComponent for startup placement.' }
-            $main = $main.Replace('InitializeComponent();', 'InitializeComponent();' + [Environment]::NewLine + '        WindowStartupLocation = WindowStartupLocation.Manual;' + [Environment]::NewLine + '        Loaded += (_, _) => { Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0; };')
+            $main = $main.Replace('InitializeComponent();', 'InitializeComponent();' + [Environment]::NewLine + '        WindowStartupLocation = WindowStartupLocation.Manual;' + [Environment]::NewLine + '        Loaded += (_, _) => { Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0; LoadShortcutSettings(); RegisterShortcutHotkeys(); };
+        Closing += (_, _) => UnregisterShortcutHotkeys();')
           }
           $main = $main.Replace('FpsCombo.SelectedIndex = _settings.FrameRate == 60 ? 1 : 0;', 'FpsCombo.SelectedIndex = _settings.FrameRate == 15 ? 0 : _settings.FrameRate == 60 ? 2 : 1;')
           $main = $main.Replace('Framerate = FpsCombo.SelectedIndex == 1 ? 60 : 30,', 'Framerate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30,')
@@ -194,7 +212,7 @@ jobs:
           if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
             $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
             if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
-            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private DisplayRecordingSource? _activeDisplaySource;`r`n    private bool _discardRecordingOnComplete;"
+            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private RegionResizeHandlesController? _regionResizeHandles;`r`n    private DisplayRecordingSource? _activeDisplaySource;`r`n    private bool _discardRecordingOnComplete;`r`n    private bool _isPaused;`r`n    private System.Windows.Interop.HwndSource? _shortcutHwndSource;`r`n    private int[] _shortcutModifiers = new int[] { 3, 3, 3, 3 };`r`n    private int[] _shortcutKeys = new int[] { 0x52, 0x50, 0x53, 0x58 };`r`n    private const int ShortcutMessageId = 0x0312;`r`n    [System.Runtime.InteropServices.DllImport(\"user32.dll\", SetLastError = true)] private static extern bool AppRegisterHotKey(System.IntPtr hWnd, int id, uint modifiers, uint virtualKey);`r`n    [System.Runtime.InteropServices.DllImport(\"user32.dll\", SetLastError = true)] private static extern bool AppUnregisterHotKey(System.IntPtr hWnd, int id);"
             $main = $main.Insert($classForState.Index + $classForState.Length, $stateFields)
           }
           $oldRegionFlow = '(?s)DrawingRectangle\? selectedRegion = null;\s*if \(RegionRadio\.IsChecked == true\)\s*\{\s*ShowInTaskbar = true;.*?selectedRegion = selector\.SelectedArea;\s*\}'
@@ -275,7 +293,7 @@ jobs:
               {
                   var expanded = OptionsPanel.Visibility != Visibility.Visible;
                   OptionsPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-                  Height = expanded ? 200 : 52;
+                  Height = expanded ? 310 : 52;
                   OptionsButton.Content = expanded ? "收起" : "选项";
               }
 
@@ -335,6 +353,7 @@ jobs:
 
               private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
               {
+                  if (Keyboard.FocusedElement is TextBox hotkeyBox && (hotkeyBox.Name == "RecordHotkeyBox" || hotkeyBox.Name == "PauseHotkeyBox" || hotkeyBox.Name == "StopHotkeyBox" || hotkeyBox.Name == "CancelHotkeyBox")) return;
                   if (e.Key != System.Windows.Input.Key.Escape) return;
                   CancelSelectedRegion();
                   e.Handled = true;
@@ -481,8 +500,8 @@ jobs:
             '区域位置更新失败' = '区域更新失败，请重试'
             '录制中 · 按 Ctrl + Alt + R 停止' = '录制中'
             'SetStatus("录制中 · 00:00:00", StatusTone.Recording);' = 'SetStatus("录制中", StatusTone.Recording);'
-            'RecordButton.Content = "●  开始录制";' = 'RecordButton.Content = "开始录制";'
-            'RecordButton.Content = "■  停止并保存";' = 'RecordButton.Content = "停止并保存";'
+            'RecordButton.Content = "●  开始录制";' = 'RecordButton.Content = "录制";'
+            'RecordButton.Content = "■  停止并保存";' = 'RecordButton.Content = "结束";'
             'RecordButton.Content = "正在准备…";' = 'RecordButton.Content = "准备中…";'
             'RecordButton.Content = "正在保存…";' = 'RecordButton.Content = "保存中…";'
           }
