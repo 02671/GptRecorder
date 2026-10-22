@@ -431,6 +431,28 @@ jobs:
           if (!$main.Contains('new System.Action(ResetRecordingClock)')) {
             $main = $main.Insert($lineStart, $recordHooks + "`r`n")
           }
+          # Keep toolbar status text compact while leaving diagnostic details in error dialogs.
+          $statusReplacements = @{
+            '请先点击“区域录制”并完成区域框选' = '请先选择区域'
+            '已取消区域选择，请重新点击“区域录制”框选' = '已取消区域'
+            '已取消区域选择' = '已取消区域'
+            '已选择区域，可拖动右上角圆点调整位置，Esc 取消区域' = '区域已选 · Esc 取消'
+            '已选择区域，点击开始录制' = '区域已选 · Esc 取消'
+            '正在准备录制…' = '准备中…'
+            '正在保存视频…' = '保存中…'
+            '区域位置暂未应用，请稍后重试' = '区域更新失败，请重试'
+            '区域位置更新失败' = '区域更新失败，请重试'
+            '录制中 · 按 Ctrl + Alt + R 停止' = '录制中'
+            'SetStatus("录制中 · 00:00:00", StatusTone.Recording);' = 'SetStatus("录制中", StatusTone.Recording);'
+            'RecordButton.Content = "●  开始录制";' = 'RecordButton.Content = "开始录制";'
+            'RecordButton.Content = "■  停止并保存";' = 'RecordButton.Content = "停止并保存";'
+            'RecordButton.Content = "正在准备…";' = 'RecordButton.Content = "准备中…";'
+            'RecordButton.Content = "正在保存…";' = 'RecordButton.Content = "保存中…";'
+          }
+          foreach ($oldText in $statusReplacements.Keys) {
+            $main = $main.Replace($oldText, $statusReplacements[$oldText])
+          }
+          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
