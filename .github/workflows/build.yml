@@ -320,7 +320,7 @@ jobs:
           }
           $oldRecordingStatus = 'SetStatus("录制中 · 00:00:00", StatusTone.Recording);'
           if ($main.Contains($oldRecordingStatus)) {
-            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中", StatusTone.Recording);' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";' + [Environment]::NewLine + '            _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);' + [Environment]::NewLine + '            _isPaused = false;' + [Environment]::NewLine + '            PauseButton.Content = "暂停";' + [Environment]::NewLine + '            PauseButton.IsEnabled = true;' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";' + [Environment]::NewLine + '            _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);' + [Environment]::NewLine + '            _regionMoveHandleWindow?.RefreshActionState();')
           } elseif (!$main.Contains('TimerText.Text = "00:00:00";')) {
             throw 'Could not locate the start-recording status to initialize the timer.'
           }
@@ -381,6 +381,12 @@ jobs:
               {
                   if (!_selectedRegionForRecording.HasValue || !_isRecording || _isStarting || _isStopping) return;
                   RecordButton_Click(this, new RoutedEventArgs());
+              }
+
+              private void PauseRecordingFromOverlay()
+              {
+                  if (!_selectedRegionForRecording.HasValue || !_isRecording || _isStarting || _isStopping) return;
+                  PauseButton_Click(this, new RoutedEventArgs());
               }
 
               private void CancelRegionRecordingWithoutSaving()
@@ -456,7 +462,7 @@ jobs:
                   if (_regionMoveHandleWindow == null || !_regionMoveHandleWindow.IsVisible)
                   {
                       _regionMoveHandleWindow?.Close();
-                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, StartRegionRecordingFromOverlay, StopRegionRecordingFromOverlay, CancelRegionRecordingWithoutSaving, CancelSelectedRegion, () => _isRecording, () => _isStarting || _isStopping, () => _selectedRegionForRecording.HasValue);
+                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, StartRegionRecordingFromOverlay, StopRegionRecordingFromOverlay, PauseRecordingFromOverlay, CancelRegionRecordingWithoutSaving, CancelSelectedRegion, () => _isRecording, () => _isPaused, () => _isStarting || _isStopping, () => _selectedRegionForRecording.HasValue);
                       _regionMoveHandleWindow.Show();
                   }
                   else
@@ -777,6 +783,10 @@ jobs:
           foreach ($oldText in $statusReplacements.Keys) {
             $main = $main.Replace($oldText, $statusReplacements[$oldText])
           }
+          $clockMethod = [regex]::Match($main, '(?m)^\s*private void UpdateRecordingClock\s*\([^)]*\)\s*\{')
+          if ($clockMethod.Success -and !$main.Contains('if (_isPaused) return;')) {
+            $main = $main.Insert($clockMethod.Index + $clockMethod.Length, [Environment]::NewLine + '        if (_isPaused) return;')
+          }
           $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
@@ -899,18 +909,21 @@ jobs:
               private const int GwlExStyle = -20;
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
-              private const double ToolbarWidth = 402.0;
+              private const double ToolbarWidth = 448.0;
               private const double ToolbarHeight = 40.0;
               private const double ToolbarGap = 7.0;
               private readonly Action<DrawingRectangle> _moveCallback;
               private readonly Action _startCallback;
               private readonly Action _stopCallback;
+              private readonly Action _pauseCallback;
               private readonly Action _discardCallback;
               private readonly Action _cancelCallback;
               private readonly Func<bool> _isRecording;
+              private readonly Func<bool> _isPaused;
               private readonly Func<bool> _isBusy;
               private readonly Func<bool> _hasSelection;
               private readonly Button _startButton;
+              private readonly Button _pauseButton;
               private readonly Button _stopButton;
               private readonly Button _discardButton;
               private readonly Button _cancelButton;
@@ -935,9 +948,11 @@ jobs:
                   Action<DrawingRectangle> moveCallback,
                   Action startCallback,
                   Action stopCallback,
+                  Action pauseCallback,
                   Action discardCallback,
                   Action cancelCallback,
                   Func<bool> isRecording,
+                  Func<bool> isPaused,
                   Func<bool> isBusy,
                   Func<bool> hasSelection)
               {
@@ -945,9 +960,11 @@ jobs:
                   _moveCallback = moveCallback;
                   _startCallback = startCallback;
                   _stopCallback = stopCallback;
+                  _pauseCallback = pauseCallback;
                   _discardCallback = discardCallback;
                   _cancelCallback = cancelCallback;
                   _isRecording = isRecording;
+                  _isPaused = isPaused;
                   _isBusy = isBusy;
                   _hasSelection = hasSelection;
           
@@ -993,15 +1010,19 @@ jobs:
                       TextAlignment = System.Windows.TextAlignment.Center
                   };
           
-                  _startButton = CreateActionButton("开始录制", 58,
+                  _startButton = CreateActionButton("录制", 58,
                       Color.FromRgb(234, 249, 240), Color.FromRgb(197, 234, 212), Color.FromRgb(24, 117, 72), 3);
                   _startButton.Click += (_, _) => _startCallback();
           
-                  _stopButton = CreateActionButton("结束录制", 58,
+                  _pauseButton = CreateActionButton("暂停", 58,
+                      Color.FromRgb(239, 245, 255), Color.FromRgb(203, 218, 248), Color.FromRgb(42, 82, 166), 3);
+                  _pauseButton.Click += (_, _) => _pauseCallback();
+
+                  _stopButton = CreateActionButton("结束", 58,
                       Color.FromRgb(255, 240, 239), Color.FromRgb(248, 208, 204), Color.FromRgb(185, 56, 56), 3);
                   _stopButton.Click += (_, _) => _stopCallback();
           
-                  _discardButton = CreateActionButton("取消录制", 58,
+                  _discardButton = CreateActionButton("取消", 58,
                       Color.FromRgb(255, 248, 230), Color.FromRgb(246, 226, 168), Color.FromRgb(150, 91, 12), 3);
                   _discardButton.Click += (_, _) => _discardCallback();
           
@@ -1012,6 +1033,7 @@ jobs:
                   var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                   row.Children.Add(_recordingTimeText);
                   row.Children.Add(_startButton);
+                  row.Children.Add(_pauseButton);
                   row.Children.Add(_stopButton);
                   row.Children.Add(_discardButton);
                   row.Children.Add(_cancelButton);
@@ -1073,12 +1095,18 @@ jobs:
                   };
               }
 
-              private void RefreshActionState()
+              public void RefreshActionState()
               {
                   var recording = _isRecording();
+                  var paused = _isPaused();
                   var busy = _isBusy();
                   var selected = _hasSelection();
+                  _startButton.Content = "录制";
+                  _pauseButton.Content = paused ? "继续" : "暂停";
+                  _stopButton.Content = "结束";
+                  _discardButton.Content = "取消";
                   _startButton.IsEnabled = selected && !recording && !busy;
+                  _pauseButton.IsEnabled = selected && recording && !busy;
                   _stopButton.IsEnabled = selected && recording && !busy;
                   _discardButton.IsEnabled = selected && recording && !busy;
                   _cancelButton.IsEnabled = selected && !recording && !busy;
@@ -1156,6 +1184,204 @@ jobs:
                   x = Math.Clamp(x, bounds.Left, Math.Max(bounds.Left, bounds.Right - _dragStartArea.Width));
                   y = Math.Clamp(y, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - _dragStartArea.Height));
                   _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
+              }
+          }
+
+          internal enum RegionResizeEdge
+          {
+              TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left
+          }
+
+          internal sealed class RegionResizeHandlesController
+          {
+              private readonly System.Collections.Generic.List<RegionResizeHandleWindow> _handles = new();
+              private readonly Action<DrawingRectangle, RegionResizeEdge?> _resizeCallback;
+              private DrawingRectangle _area;
+
+              public RegionResizeHandlesController(DrawingRectangle area, Action<DrawingRectangle, RegionResizeEdge?> resizeCallback)
+              {
+                  _area = area;
+                  _resizeCallback = resizeCallback;
+                  foreach (RegionResizeEdge edge in Enum.GetValues(typeof(RegionResizeEdge)))
+                  {
+                      var handle = new RegionResizeHandleWindow(area, edge, OnHandleDrag, OnHandleDragComplete);
+                      _handles.Add(handle);
+                      handle.Show();
+                  }
+                  UpdateArea(area, null);
+              }
+
+              public void UpdateArea(DrawingRectangle area, RegionResizeEdge? activeEdge)
+              {
+                  _area = area;
+                  foreach (var handle in _handles) handle.UpdateArea(area, activeEdge);
+              }
+
+              private void OnHandleDrag(DrawingRectangle area, RegionResizeEdge edge)
+              {
+                  _area = area;
+                  _resizeCallback(area, edge);
+              }
+
+              private void OnHandleDragComplete()
+              {
+                  UpdateArea(_area, null);
+              }
+
+              public void Close()
+              {
+                  foreach (var handle in _handles.ToArray()) handle.Close();
+                  _handles.Clear();
+              }
+          }
+
+          internal sealed class RegionResizeHandleWindow : Window
+          {
+              private const int GwlExStyle = -20;
+              private const int WsExToolWindow = 0x00000080;
+              private const int MinimumWidth = 80;
+              private const int MinimumHeight = 60;
+              private readonly RegionResizeEdge _edge;
+              private readonly Action<DrawingRectangle, RegionResizeEdge> _dragCallback;
+              private readonly Action _dragCompleteCallback;
+              private readonly Border _grip;
+              private DrawingRectangle _area;
+              private DrawingRectangle _dragStartArea;
+              private int _startCursorX;
+              private int _startCursorY;
+              private double _scaleX = 1.0;
+              private double _scaleY = 1.0;
+              private bool _dragging;
+
+              [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+              private struct NativePoint { public int X; public int Y; }
+
+              [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+              private static extern bool GetCursorPos(out NativePoint point);
+
+              [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+              private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+              [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+              private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+              public RegionResizeHandleWindow(DrawingRectangle area, RegionResizeEdge edge, Action<DrawingRectangle, RegionResizeEdge> dragCallback, Action dragCompleteCallback)
+              {
+                  _area = area;
+                  _edge = edge;
+                  _dragCallback = dragCallback;
+                  _dragCompleteCallback = dragCompleteCallback;
+                  WindowStyle = WindowStyle.None;
+                  ResizeMode = ResizeMode.NoResize;
+                  AllowsTransparency = true;
+                  Background = Brushes.Transparent;
+                  ShowInTaskbar = false;
+                  ShowActivated = false;
+                  Focusable = false;
+                  Topmost = true;
+                  WindowStartupLocation = WindowStartupLocation.Manual;
+                  Width = 18;
+                  Height = 18;
+                  _grip = new Border
+                  {
+                      Width = 14,
+                      Height = 14,
+                      Background = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
+                      BorderBrush = new SolidColorBrush(Color.FromRgb(54, 105, 232)),
+                      BorderThickness = new Thickness(2),
+                      CornerRadius = new CornerRadius(3),
+                      Cursor = CursorForEdge(edge),
+                      HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                      VerticalAlignment = System.Windows.VerticalAlignment.Center
+                  };
+                  Content = _grip;
+                  _grip.MouseLeftButtonDown += OnMouseDown;
+                  _grip.MouseMove += OnMouseMove;
+                  _grip.MouseLeftButtonUp += OnMouseUp;
+                  SourceInitialized += (_, _) =>
+                  {
+                      var hwnd = new WindowInteropHelper(this).Handle;
+                      var style = GetWindowLong(hwnd, GwlExStyle);
+                      SetWindowLong(hwnd, GwlExStyle, style | WsExToolWindow);
+                      var dpi = VisualTreeHelper.GetDpi(this);
+                      _scaleX = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1.0;
+                      _scaleY = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1.0;
+                      PositionHandle();
+                  };
+                  Loaded += (_, _) => PositionHandle();
+              }
+
+              private static Cursor CursorForEdge(RegionResizeEdge edge)
+              {
+                  return edge == RegionResizeEdge.Left || edge == RegionResizeEdge.Right ? Cursors.SizeWE :
+                         edge == RegionResizeEdge.Top || edge == RegionResizeEdge.Bottom ? Cursors.SizeNS :
+                         edge == RegionResizeEdge.TopLeft || edge == RegionResizeEdge.BottomRight ? Cursors.SizeNWSE : Cursors.SizeNESW;
+              }
+
+              public void UpdateArea(DrawingRectangle area, RegionResizeEdge? activeEdge)
+              {
+                  _area = area;
+                  if (_dragging && activeEdge == _edge) return;
+                  if (IsInitialized) PositionHandle();
+              }
+
+              private void PositionHandle()
+              {
+                  if (!IsInitialized) return;
+                  var centerX = _edge == RegionResizeEdge.TopLeft || _edge == RegionResizeEdge.Left || _edge == RegionResizeEdge.BottomLeft ? _area.Left :
+                                _edge == RegionResizeEdge.TopRight || _edge == RegionResizeEdge.Right || _edge == RegionResizeEdge.BottomRight ? _area.Right :
+                                _area.Left + _area.Width / 2.0;
+                  var centerY = _edge == RegionResizeEdge.TopLeft || _edge == RegionResizeEdge.Top || _edge == RegionResizeEdge.TopRight ? _area.Top :
+                                _edge == RegionResizeEdge.BottomLeft || _edge == RegionResizeEdge.Bottom || _edge == RegionResizeEdge.BottomRight ? _area.Bottom :
+                                _area.Top + _area.Height / 2.0;
+                  Left = (centerX - Width * _scaleX / 2.0) / _scaleX;
+                  Top = (centerY - Height * _scaleY / 2.0) / _scaleY;
+              }
+
+              private void OnMouseDown(object sender, MouseButtonEventArgs e)
+              {
+                  if (e.ChangedButton != MouseButton.Left || !GetCursorPos(out var cursor)) return;
+                  _dragging = true;
+                  _dragStartArea = _area;
+                  _startCursorX = cursor.X;
+                  _startCursorY = cursor.Y;
+                  _grip.CaptureMouse();
+                  e.Handled = true;
+              }
+
+              private void OnMouseMove(object sender, MouseEventArgs e)
+              {
+                  if (!_dragging || e.LeftButton != MouseButtonState.Pressed || !GetCursorPos(out var cursor)) return;
+                  var dx = cursor.X - _startCursorX;
+                  var dy = cursor.Y - _startCursorY;
+                  var bounds = System.Windows.Forms.SystemInformation.VirtualScreen;
+                  var left = _dragStartArea.Left;
+                  var top = _dragStartArea.Top;
+                  var right = _dragStartArea.Right;
+                  var bottom = _dragStartArea.Bottom;
+
+                  if (_edge == RegionResizeEdge.Left || _edge == RegionResizeEdge.TopLeft || _edge == RegionResizeEdge.BottomLeft)
+                      left = Math.Clamp(_dragStartArea.Left + dx, bounds.Left, right - MinimumWidth);
+                  if (_edge == RegionResizeEdge.Right || _edge == RegionResizeEdge.TopRight || _edge == RegionResizeEdge.BottomRight)
+                      right = Math.Clamp(_dragStartArea.Right + dx, left + MinimumWidth, bounds.Right);
+                  if (_edge == RegionResizeEdge.Top || _edge == RegionResizeEdge.TopLeft || _edge == RegionResizeEdge.TopRight)
+                      top = Math.Clamp(_dragStartArea.Top + dy, bounds.Top, bottom - MinimumHeight);
+                  if (_edge == RegionResizeEdge.Bottom || _edge == RegionResizeEdge.BottomLeft || _edge == RegionResizeEdge.BottomRight)
+                      bottom = Math.Clamp(_dragStartArea.Bottom + dy, top + MinimumHeight, bounds.Bottom);
+
+                  if (right - left < MinimumWidth || bottom - top < MinimumHeight) return;
+                  var resized = DrawingRectangle.FromLTRB(left, top, right, bottom);
+                  if (resized != _area) _dragCallback(resized, _edge);
+                  e.Handled = true;
+              }
+
+              private void OnMouseUp(object sender, MouseButtonEventArgs e)
+              {
+                  if (!_dragging || e.ChangedButton != MouseButton.Left) return;
+                  _dragging = false;
+                  _grip.ReleaseMouseCapture();
+                  _dragCompleteCallback();
+                  e.Handled = true;
               }
           }
           
