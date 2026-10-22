@@ -680,7 +680,7 @@ jobs:
                   _cancelButton.ToolTip = "取消当前选区并关闭边框";
                   _cancelButton.Click += (_, _) => _cancelCallback();
           
-                  var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                  var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                   row.Children.Add(moveGrip);
                   row.Children.Add(_startButton);
                   row.Children.Add(_stopButton);
