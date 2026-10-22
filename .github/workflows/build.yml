@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -752,3 +753,39 @@ jobs:
           name: 轻录屏 ${{ github.ref_name }}
           generate_release_notes: true
           files: artifacts/轻录屏-Windows-x64.zip
+
+
+      - name: Keep only the latest successful build
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $repo = $env:REPOSITORY
+          $currentRunId = [long]$env:CURRENT_RUN_ID
+          $runsUrl = "https://api.github.com/repos/$repo/actions/workflows/build.yml/runs?per_page=100"
+          $runResponse = Invoke-RestMethod -Method Get -Uri $runsUrl -Headers $headers
+          $oldRuns = @($runResponse.workflow_runs | Where-Object { [long]$_.id -ne $currentRunId })
+          $oldRunIds = @($oldRuns | ForEach-Object { [string]$_.id })
+
+          $artifactUrl = "https://api.github.com/repos/$repo/actions/artifacts?per_page=100"
+          $artifactResponse = Invoke-RestMethod -Method Get -Uri $artifactUrl -Headers $headers
+          foreach ($artifact in $artifactResponse.artifacts) {
+            if ($null -ne $artifact.workflow_run -and $oldRunIds -contains [string]$artifact.workflow_run.id) {
+              Write-Host "Deleting old build package: $($artifact.name) (artifact $($artifact.id))"
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/artifacts/$($artifact.id)" -Headers $headers
+            }
+          }
+
+          foreach ($run in $oldRuns) {
+            Write-Host "Deleting old build record: $($run.id) - $($run.display_title)"
+            Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/runs/$($run.id)" -Headers $headers
+          }
+          Write-Host "Kept the latest successful workflow run $currentRunId and its artifact.";
