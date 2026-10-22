@@ -50,8 +50,8 @@ jobs:
           <Window x:Class="QingRecorder.MainWindow"
                   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                  Title="轻录屏" Height="52" MinHeight="52" MinWidth="0" SizeToContent="Width"
-                  WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None"
+                  Title="录屏" Height="52" MinHeight="52" MinWidth="0" SizeToContent="Width"
+                  WindowStartupLocation="Manual" ResizeMode="NoResize" WindowStyle="None"
                   AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="True" PreviewKeyDown="MainWindow_PreviewKeyDown"
                   Loaded="MainWindow_Loaded" SourceInitialized="MainWindow_SourceInitialized" Closing="MainWindow_Closing">
               <Window.Resources>
@@ -144,7 +144,7 @@ jobs:
                                   <TextBlock x:Name="StatusText" Text="准备就绪" FontSize="12" Foreground="#16814D" VerticalAlignment="Center" MaxWidth="145" TextTrimming="CharacterEllipsis"/>
                               </StackPanel>
                           </Border>
-                          <TextBlock x:Name="TimerText" Text="00:00:00" FontSize="14" FontFamily="Consolas" Foreground="#27364B" VerticalAlignment="Center" MinWidth="76" Margin="0,0,10,0"/>
+                          <TextBlock x:Name="TimerText" Text="00:00:00" Visibility="Collapsed" FontSize="14" FontFamily="Consolas" Foreground="#27364B" VerticalAlignment="Center" MinWidth="76" Margin="0,0,10,0"/>
                           <Button x:Name="CloseButton" Style="{StaticResource ActionButton}" Content="关闭" MinWidth="54" Margin="0" Click="CloseButton_Click"/>
                       </StackPanel>
                   </Border>
@@ -174,7 +174,7 @@ jobs:
                                   <TextBox x:Name="OutputPathText" Grid.Column="1" Height="30" VerticalContentAlignment="Center" Padding="8,3" BorderBrush="#D8E1ED" Background="#FBFCFE" FontSize="12" Margin="0,0,8,0"/>
                                   <Button Grid.Column="2" Style="{StaticResource ActionButton}" Content="选择文件夹" Click="BrowseFolder_Click" Margin="0" Height="30" VerticalAlignment="Center"/>
                               </Grid>
-                              <TextBlock x:Name="LatestFileText" Text="最近录制：暂无文件" Visibility="Collapsed" FontSize="11" Foreground="#718096" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
+                              <TextBlock x:Name="LatestFileText" Text="" Visibility="Collapsed" Width="0" Height="0"/>
                           </StackPanel>
                       </Border>
                   </Grid>
@@ -184,6 +184,10 @@ jobs:
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
+          if (!$main.Contains('Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0;')) {
+            if (!$main.Contains('InitializeComponent();')) { throw 'Could not find MainWindow InitializeComponent for startup placement.' }
+            $main = $main.Replace('InitializeComponent();', 'InitializeComponent();' + [Environment]::NewLine + '        WindowStartupLocation = WindowStartupLocation.Manual;' + [Environment]::NewLine + '        Loaded += (_, _) => { Left = (SystemParameters.PrimaryScreenWidth - ActualWidth) / 2; Top = 0; };')
+          }
           $main = $main.Replace('FpsCombo.SelectedIndex = _settings.FrameRate == 60 ? 1 : 0;', 'FpsCombo.SelectedIndex = _settings.FrameRate == 15 ? 0 : _settings.FrameRate == 60 ? 2 : 1;')
           $main = $main.Replace('Framerate = FpsCombo.SelectedIndex == 1 ? 60 : 30,', 'Framerate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30,')
           $main = $main.Replace('_settings.FrameRate = FpsCombo.SelectedIndex == 1 ? 60 : 30;', '_settings.FrameRate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30;')
@@ -246,7 +250,7 @@ jobs:
                           CloseRegionOutline();
                           FullScreenRadio.IsChecked = true;
                           SetStatus("区域工具加载失败", StatusTone.Error);
-                          MessageBox.Show(this, $"区域工具加载失败：{ex.Message}", "轻录屏", MessageBoxButton.OK, MessageBoxImage.Error);
+                          MessageBox.Show(this, $"区域工具加载失败：{ex.Message}", "录屏", MessageBoxButton.OK, MessageBoxImage.Error);
                           return;
                       }
                       Activate();
@@ -292,13 +296,13 @@ jobs:
           }
           $oldClockLine = 'StatusText.Text = $"录制中 · {elapsed:hh\\:mm\\:ss}";'
           if ($main.Contains($oldClockLine)) {
-            $main = $main.Replace($oldClockLine, 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')
+            $main = $main.Replace($oldClockLine, 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           } elseif (!$main.Contains('TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')) {
             throw 'Could not locate UpdateRecordingClock text to separate the timer display.'
           }
           $oldRecordingStatus = 'SetStatus("录制中 · 00:00:00", StatusTone.Recording);'
           if ($main.Contains($oldRecordingStatus)) {
-            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中", StatusTone.Recording);' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";')
+            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中", StatusTone.Recording);' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";' + [Environment]::NewLine + '            _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           } elseif (!$main.Contains('TimerText.Text = "00:00:00";')) {
             throw 'Could not locate the start-recording status to initialize the timer.'
           }
@@ -371,6 +375,7 @@ jobs:
               {
                   _clock.Stop();
                   TimerText.Text = "00:00:00";
+                  _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);
               }
 
               private void FullScreenRadio_Click(object sender, RoutedEventArgs e)
@@ -484,7 +489,7 @@ jobs:
           foreach ($oldText in $statusReplacements.Keys) {
             $main = $main.Replace($oldText, $statusReplacements[$oldText])
           }
-          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')
+          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中";' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
@@ -606,7 +611,7 @@ jobs:
               private const int GwlExStyle = -20;
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
-              private const double ToolbarWidth = 318.0;
+              private const double ToolbarWidth = 402.0;
               private const double ToolbarHeight = 40.0;
               private const double ToolbarGap = 7.0;
               private readonly Action<DrawingRectangle> _moveCallback;
@@ -621,6 +626,7 @@ jobs:
               private readonly Button _stopButton;
               private readonly Button _discardButton;
               private readonly Button _cancelButton;
+              private readonly TextBlock _recordingTimeText;
               private readonly DispatcherTimer _stateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
               private DrawingRectangle _area;
               private DrawingRectangle _dragStartArea;
@@ -686,6 +692,18 @@ jobs:
                   moveContent.Children.Add(new TextBlock { Text = "移动", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center });
                   moveGrip.Child = moveContent;
                   moveGrip.MouseLeftButtonDown += OnHandleMouseDown;
+
+                  _recordingTimeText = new TextBlock
+                  {
+                      Text = "00:00:00",
+                      Width = 66,
+                      Margin = new Thickness(0, 0, 6, 0),
+                      FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                      FontSize = 12,
+                      Foreground = new SolidColorBrush(Color.FromRgb(39, 54, 75)),
+                      VerticalAlignment = VerticalAlignment.Center,
+                      TextAlignment = System.Windows.TextAlignment.Center
+                  };
           
                   _startButton = CreateActionButton("开始录制", 58,
                       Color.FromRgb(234, 249, 240), Color.FromRgb(197, 234, 212), Color.FromRgb(24, 117, 72), 3);
@@ -704,6 +722,7 @@ jobs:
                   _cancelButton.Click += (_, _) => _cancelCallback();
           
                   var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                  row.Children.Add(_recordingTimeText);
                   row.Children.Add(_startButton);
                   row.Children.Add(_stopButton);
                   row.Children.Add(_discardButton);
@@ -777,6 +796,11 @@ jobs:
                   _cancelButton.IsEnabled = selected && !recording && !busy;
               }
           
+              public void SetRecordingTime(string value)
+              {
+                  _recordingTimeText.Text = value;
+              }
+
               public void UpdateArea(DrawingRectangle area)
               {
                   _area = area;
