@@ -480,6 +480,8 @@ jobs:
           using System.Windows.Controls;
           using Button = System.Windows.Controls.Button;
           using Control = System.Windows.Controls.Control;
+          using RelativeSource = System.Windows.Data.RelativeSource;
+          using RelativeSourceMode = System.Windows.Data.RelativeSourceMode;
           using Cursors = System.Windows.Input.Cursors;
           using KeyEventArgs = System.Windows.Input.KeyEventArgs;
           using System.Windows.Input;
@@ -657,7 +659,7 @@ jobs:
                       Cursor = Cursors.SizeAll,
                       ToolTip = "拖动这里可移动整个录制区域"
                   };
-                  var moveContent = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                  var moveContent = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Center, VerticalAlignment = System.Windows.VerticalAlignment.Center };
                   moveContent.Children.Add(new TextBlock { Text = "✥", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
                   moveContent.Children.Add(new TextBlock { Text = "移动", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center });
                   moveGrip.Child = moveContent;
@@ -751,8 +753,8 @@ jobs:
                   shell.SetBinding(Border.PaddingProperty, new System.Windows.Data.Binding(nameof(Control.Padding)) { RelativeSource = templatedParent });
                   shell.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
                   var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-                  presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-                  presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+                  presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, System.Windows.HorizontalAlignment.Center);
+                  presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, System.Windows.VerticalAlignment.Center);
                   shell.AppendChild(presenter);
                   button.Template = new ControlTemplate(typeof(Button)) { VisualTree = shell };
                   var disabledTrigger = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
