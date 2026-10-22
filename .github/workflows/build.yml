@@ -336,6 +336,18 @@ jobs:
                   SetStatus("已取消区域选择", StatusTone.Ready);
               }
 
+              private void StartRegionRecordingFromOverlay()
+              {
+                  if (!_selectedRegionForRecording.HasValue || _isStarting || _isRecording || _isStopping) return;
+                  RecordButton_Click(this, new RoutedEventArgs());
+              }
+
+              private void StopRegionRecordingFromOverlay()
+              {
+                  if (!_selectedRegionForRecording.HasValue || !_isRecording || _isStarting || _isStopping) return;
+                  RecordButton_Click(this, new RoutedEventArgs());
+              }
+
               private void ResetRecordingClock()
               {
                   _clock.Stop();
@@ -367,7 +379,7 @@ jobs:
                   if (_regionMoveHandleWindow == null || !_regionMoveHandleWindow.IsVisible)
                   {
                       _regionMoveHandleWindow?.Close();
-                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, CancelSelectedRegion);
+                      _regionMoveHandleWindow = new RegionMoveHandleWindow(area, UpdateSelectedRegion, StartRegionRecordingFromOverlay, StopRegionRecordingFromOverlay, CancelSelectedRegion, () => _isRecording, () => _isStarting || _isStopping, () => _selectedRegionForRecording.HasValue);
                       _regionMoveHandleWindow.Show();
                   }
                   else
@@ -471,6 +483,7 @@ jobs:
           using System.Windows.Input;
           using System.Windows.Interop;
           using System.Windows.Media;
+          using System.Windows.Threading;
           using ShapesRectangle = System.Windows.Shapes.Rectangle;
           
           namespace QingRecorder;
@@ -570,10 +583,20 @@ jobs:
               private const int GwlExStyle = -20;
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
-              private const double HandleWidth = 12.0;
-              private const double HandleHeight = 12.0;
-                        private readonly Action<DrawingRectangle> _moveCallback;
+              private const double ToolbarWidth = 318.0;
+              private const double ToolbarHeight = 44.0;
+              private const double ToolbarGap = 7.0;
+              private readonly Action<DrawingRectangle> _moveCallback;
+              private readonly Action _startCallback;
+              private readonly Action _stopCallback;
               private readonly Action _cancelCallback;
+              private readonly Func<bool> _isRecording;
+              private readonly Func<bool> _isBusy;
+              private readonly Func<bool> _hasSelection;
+              private readonly Button _startButton;
+              private readonly Button _stopButton;
+              private readonly Button _cancelButton;
+              private readonly DispatcherTimer _stateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
               private DrawingRectangle _area;
               private DrawingRectangle _dragStartArea;
               private double _dragStartLeft;
@@ -588,11 +611,25 @@ jobs:
               [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
               private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
           
-              public RegionMoveHandleWindow(DrawingRectangle area, Action<DrawingRectangle> moveCallback, Action cancelCallback)
+              public RegionMoveHandleWindow(
+                  DrawingRectangle area,
+                  Action<DrawingRectangle> moveCallback,
+                  Action startCallback,
+                  Action stopCallback,
+                  Action cancelCallback,
+                  Func<bool> isRecording,
+                  Func<bool> isBusy,
+                  Func<bool> hasSelection)
               {
                   _area = area;
                   _moveCallback = moveCallback;
+                  _startCallback = startCallback;
+                  _stopCallback = stopCallback;
                   _cancelCallback = cancelCallback;
+                  _isRecording = isRecording;
+                  _isBusy = isBusy;
+                  _hasSelection = hasSelection;
+          
                   WindowStyle = WindowStyle.None;
                   ResizeMode = ResizeMode.NoResize;
                   AllowsTransparency = true;
@@ -602,31 +639,77 @@ jobs:
                   Focusable = true;
                   Topmost = true;
                   WindowStartupLocation = WindowStartupLocation.Manual;
-                  Width = HandleWidth;
-                  Height = HandleHeight;
+                  Width = ToolbarWidth;
+                  Height = ToolbarHeight;
           
-                  var handle = new Border
+                  var moveGrip = new Border
                   {
-                      Width = HandleWidth,
-                      Height = HandleHeight,
-                      Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
-                      BorderBrush = Brushes.White,
+                      Width = 62,
+                      Height = 30,
+                      Margin = new Thickness(0, 0, 6, 0),
+                      Padding = new Thickness(8, 3, 8, 3),
+                      Background = new SolidColorBrush(Color.FromRgb(238, 244, 255)),
+                      BorderBrush = new SolidColorBrush(Color.FromRgb(211, 225, 252)),
                       BorderThickness = new Thickness(1),
-                      CornerRadius = new CornerRadius(6),
+                      CornerRadius = new CornerRadius(7),
                       Cursor = Cursors.SizeAll,
-                      Child = new System.Windows.Shapes.Ellipse
+                      ToolTip = "拖动这里可移动整个录制区域"
+                  };
+                  var moveContent = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                  moveContent.Children.Add(new TextBlock { Text = "✥", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) });
+                  moveContent.Children.Add(new TextBlock { Text = "移动", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(43, 91, 210)), VerticalAlignment = VerticalAlignment.Center });
+                  moveGrip.Child = moveContent;
+                  moveGrip.MouseLeftButtonDown += OnHandleMouseDown;
+          
+                  _startButton = CreateActionButton("开始录制", 76,
+                      Color.FromRgb(234, 249, 240), Color.FromRgb(197, 234, 212), Color.FromRgb(24, 117, 72), 5);
+                  _startButton.ToolTip = "开始录制当前选区";
+                  _startButton.Click += (_, _) => _startCallback();
+          
+                  _stopButton = CreateActionButton("结束录制", 76,
+                      Color.FromRgb(255, 240, 239), Color.FromRgb(248, 208, 204), Color.FromRgb(185, 56, 56), 5);
+                  _stopButton.ToolTip = "结束并保存当前录制";
+                  _stopButton.Click += (_, _) => _stopCallback();
+          
+                  _cancelButton = CreateActionButton("取消选区", 66,
+                      Color.FromRgb(246, 248, 251), Color.FromRgb(220, 228, 239), Color.FromRgb(71, 85, 105), 0);
+                  _cancelButton.ToolTip = "取消当前选区并关闭边框";
+                  _cancelButton.Click += (_, _) => _cancelCallback();
+          
+                  var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                  row.Children.Add(moveGrip);
+                  row.Children.Add(_startButton);
+                  row.Children.Add(_stopButton);
+                  row.Children.Add(_cancelButton);
+          
+                  var surface = new Border
+                  {
+                      Background = Brushes.White,
+                      BorderBrush = new SolidColorBrush(Color.FromRgb(220, 228, 239)),
+                      BorderThickness = new Thickness(1),
+                      CornerRadius = new CornerRadius(10),
+                      Padding = new Thickness(6, 5, 6, 5),
+                      Child = row,
+                      Effect = new System.Windows.Media.Effects.DropShadowEffect
                       {
-                          Width = 4,
-                          Height = 4,
-                          Fill = Brushes.White,
-                          HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                          VerticalAlignment = System.Windows.VerticalAlignment.Center
+                          Color = Color.FromRgb(37, 52, 79),
+                          BlurRadius = 14,
+                          ShadowDepth = 2,
+                          Opacity = 0.18
                       }
                   };
-                  Content = handle;
-                  handle.MouseLeftButtonDown += OnHandleMouseDown;
+                  Content = surface;
+          
                   PreviewKeyDown += OnMoveHandlePreviewKeyDown;
                   LocationChanged += OnHandleLocationChanged;
+                  _stateTimer.Tick += (_, _) => RefreshActionState();
+                  Loaded += (_, _) =>
+                  {
+                      PositionHandle();
+                      RefreshActionState();
+                      _stateTimer.Start();
+                  };
+                  Closed += (_, _) => _stateTimer.Stop();
           
                   SourceInitialized += (_, _) =>
                   {
@@ -640,6 +723,52 @@ jobs:
                   };
               }
           
+              private static Button CreateActionButton(string text, double width, Color background, Color border, Color foreground, double rightMargin)
+              {
+                  var button = new Button
+                  {
+                      Content = text,
+                      Width = width,
+                      Height = 30,
+                      Margin = new Thickness(0, 0, rightMargin, 0),
+                      Padding = new Thickness(5, 3, 5, 3),
+                      FontSize = 12,
+                      FontWeight = FontWeights.SemiBold,
+                      Foreground = new SolidColorBrush(foreground),
+                      Background = new SolidColorBrush(background),
+                      BorderBrush = new SolidColorBrush(border),
+                      BorderThickness = new Thickness(1),
+                      Cursor = Cursors.Hand,
+                      Focusable = true
+                  };
+                  var shell = new FrameworkElementFactory(typeof(Border), "ButtonShell");
+                  var templatedParent = new RelativeSource(RelativeSourceMode.TemplatedParent);
+                  shell.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding(nameof(Control.Background)) { RelativeSource = templatedParent });
+                  shell.SetBinding(Border.BorderBrushProperty, new System.Windows.Data.Binding(nameof(Control.BorderBrush)) { RelativeSource = templatedParent });
+                  shell.SetBinding(Border.BorderThicknessProperty, new System.Windows.Data.Binding(nameof(Control.BorderThickness)) { RelativeSource = templatedParent });
+                  shell.SetBinding(Border.PaddingProperty, new System.Windows.Data.Binding(nameof(Control.Padding)) { RelativeSource = templatedParent });
+                  shell.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
+                  var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+                  presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+                  presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+                  shell.AppendChild(presenter);
+                  button.Template = new ControlTemplate(typeof(Button)) { VisualTree = shell };
+                  var disabledTrigger = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+                  disabledTrigger.Setters.Add(new Setter(UIElement.OpacityProperty, 0.42, "ButtonShell"));
+                  button.Template.Triggers.Add(disabledTrigger);
+                  return button;
+              }
+          
+              private void RefreshActionState()
+              {
+                  var recording = _isRecording();
+                  var busy = _isBusy();
+                  var selected = _hasSelection();
+                  _startButton.IsEnabled = selected && !recording && !busy;
+                  _stopButton.IsEnabled = selected && recording && !busy;
+                  _cancelButton.IsEnabled = selected && !recording && !busy;
+              }
+          
               public void UpdateArea(DrawingRectangle area)
               {
                   _area = area;
@@ -648,17 +777,35 @@ jobs:
           
               private void PositionHandle()
               {
-                  Left = (_area.X + Math.Max(0, _area.Width - HandleWidth - 6.0)) / _scaleX;
-                  Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
+                  if (!IsInitialized) return;
+                  var bounds = System.Windows.Forms.SystemInformation.VirtualScreen;
+                  var widthPixels = Width * _scaleX;
+                  var heightPixels = Height * _scaleY;
+                  var left = _area.X + _area.Width - widthPixels;
+                  left = Math.Clamp(left, bounds.Left, Math.Max(bounds.Left, bounds.Right - widthPixels));
+          
+                  var top = _area.Y - heightPixels - ToolbarGap;
+                  if (top < bounds.Top)
+                  {
+                      var below = _area.Y + _area.Height + ToolbarGap;
+                      top = below + heightPixels <= bounds.Bottom
+                          ? below
+                          : _area.Y - heightPixels - ToolbarGap;
+                  }
+                  top = Math.Clamp(top, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - heightPixels));
+          
+                  Left = left / _scaleX;
+                  Top = top / _scaleY;
               }
           
               private void OnMoveHandlePreviewKeyDown(object sender, KeyEventArgs e)
               {
                   if (e.Key != Key.Escape) return;
-                  _cancelCallback();
+                  if (_hasSelection() && !_isRecording() && !_isBusy())
+                      _cancelCallback();
                   e.Handled = true;
               }
-
+          
               private void OnHandleMouseDown(object sender, MouseButtonEventArgs e)
               {
                   if (e.ChangedButton != MouseButton.Left) return;
@@ -689,17 +836,14 @@ jobs:
                   var x = _dragStartArea.X + dx;
                   var y = _dragStartArea.Y + dy;
           
-                  var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
-                  if (bounds.HasValue)
-                  {
-                      x = Math.Clamp(x, 0, Math.Max(0, bounds.Value.Width - _dragStartArea.Width));
-                      y = Math.Clamp(y, 0, Math.Max(0, bounds.Value.Height - _dragStartArea.Height));
-                  }
+                  var bounds = System.Windows.Forms.SystemInformation.VirtualScreen;
+                  x = Math.Clamp(x, bounds.Left, Math.Max(bounds.Left, bounds.Right - _dragStartArea.Width));
+                  y = Math.Clamp(y, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - _dragStartArea.Height));
                   _moveCallback(new DrawingRectangle(x, y, _dragStartArea.Width, _dragStartArea.Height));
               }
           }
           
-          '@
+          '@          '@
           Set-Content -LiteralPath $overlayPath -Value $overlayCode -Encoding utf8
           Write-Host 'Compact borderless toolbar built; region outline and draggable move handle stay visible; region updates are applied dynamically during recording.'
           Write-Host '===== RegionSelectionWindow.cs ====='
