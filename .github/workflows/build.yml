@@ -211,7 +211,7 @@ jobs:
           if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
             $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
             if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
-            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private RegionResizeHandlesController? _regionResizeHandles;`r`n    private DisplayRecordingSource? _activeDisplaySource;`r`n    private bool _discardRecordingOnComplete;`r`n    private bool _isPaused;`r`n    private System.Windows.Interop.HwndSource? _shortcutHwndSource;`r`n    private int[] _shortcutModifiers = new int[] { 3, 3, 3, 3 };`r`n    private int[] _shortcutKeys = new int[] { 0x52, 0x50, 0x53, 0x58 };`r`n    private const int ShortcutMessageId = 0x0312;`r`n    [System.Runtime.InteropServices.DllImport(`"user32.dll`", SetLastError = true)] private static extern bool AppRegisterHotKey(System.IntPtr hWnd, int id, uint modifiers, uint virtualKey);`r`n    [System.Runtime.InteropServices.DllImport(`"user32.dll`", SetLastError = true)] private static extern bool AppUnregisterHotKey(System.IntPtr hWnd, int id);"
+            $stateFields = "`r`n    private DrawingRectangle? _selectedRegionForRecording;`r`n    private bool _isOpeningRegionSelector;`r`n    private RegionOutlineWindow? _regionOutlineWindow;`r`n    private RegionMoveHandleWindow? _regionMoveHandleWindow;`r`n    private RegionResizeHandlesController? _regionResizeHandles;`r`n    private DisplayRecordingSource? _activeDisplaySource;`r`n    private bool _discardRecordingOnComplete;`r`n    private bool _isPaused;`r`n    private readonly System.Diagnostics.Stopwatch _activeRecordingClock = new System.Diagnostics.Stopwatch();`r`n    private System.Windows.Interop.HwndSource? _shortcutHwndSource;`r`n    private int[] _shortcutModifiers = new int[] { 3, 3, 3, 3 };`r`n    private int[] _shortcutKeys = new int[] { 0x52, 0x50, 0x53, 0x58 };`r`n    private const int ShortcutMessageId = 0x0312;`r`n    [System.Runtime.InteropServices.DllImport(`"user32.dll`", SetLastError = true)] private static extern bool AppRegisterHotKey(System.IntPtr hWnd, int id, uint modifiers, uint virtualKey);`r`n    [System.Runtime.InteropServices.DllImport(`"user32.dll`", SetLastError = true)] private static extern bool AppUnregisterHotKey(System.IntPtr hWnd, int id);"
             $main = $main.Insert($classForState.Index + $classForState.Length, $stateFields)
           }
           $oldRegionFlow = '(?s)DrawingRectangle\? selectedRegion = null;\s*if \(RegionRadio\.IsChecked == true\)\s*\{\s*ShowInTaskbar = true;.*?selectedRegion = selector\.SelectedArea;\s*\}'
@@ -313,13 +313,13 @@ jobs:
           }
           $oldClockLine = 'StatusText.Text = $"录制中 · {elapsed:hh\\:mm\\:ss}";'
           if ($main.Contains($oldClockLine)) {
-            $main = $main.Replace($oldClockLine, 'StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+            $main = $main.Replace($oldClockLine, 'elapsed = _activeRecordingClock.Elapsed;' + [Environment]::NewLine + '        StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           } elseif (!$main.Contains('TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";')) {
             throw 'Could not locate UpdateRecordingClock text to separate the timer display.'
           }
           $oldRecordingStatus = 'SetStatus("录制中 · 00:00:00", StatusTone.Recording);'
           if ($main.Contains($oldRecordingStatus)) {
-            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);' + [Environment]::NewLine + '            _isPaused = false;' + [Environment]::NewLine + '            PauseButton.Content = "暂停";' + [Environment]::NewLine + '            PauseButton.IsEnabled = true;' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";' + [Environment]::NewLine + '            _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);' + [Environment]::NewLine + '            _regionMoveHandleWindow?.RefreshActionState();')
+            $main = $main.Replace($oldRecordingStatus, 'SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);' + [Environment]::NewLine + '            _isPaused = false;' + [Environment]::NewLine + '            _activeRecordingClock.Restart();' + [Environment]::NewLine + '            PauseButton.Content = "暂停";' + [Environment]::NewLine + '            PauseButton.IsEnabled = true;' + [Environment]::NewLine + '            TimerText.Text = "00:00:00";' + [Environment]::NewLine + '            _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);' + [Environment]::NewLine + '            _regionMoveHandleWindow?.RefreshActionState();')
           } elseif (!$main.Contains('TimerText.Text = "00:00:00";')) {
             throw 'Could not locate the start-recording status to initialize the timer.'
           }
@@ -404,6 +404,7 @@ jobs:
                       {
                           _recorder.Resume();
                           _isPaused = false;
+                          _activeRecordingClock.Start();
                           _clock.Start();
                           PauseButton.Content = "暂停";
                           SetStatus("录制中 · 暂停 " + FormatShortcut(1), StatusTone.Recording);
@@ -412,6 +413,7 @@ jobs:
                       {
                           _recorder.Pause();
                           _isPaused = true;
+                          _activeRecordingClock.Stop();
                           _clock.Stop();
                           PauseButton.Content = "继续";
                           SetStatus("录制已暂停 · 继续 " + FormatShortcut(1), StatusTone.Busy);
@@ -428,6 +430,7 @@ jobs:
               private void ResetRecordingClock()
               {
                   _clock.Stop();
+                  _activeRecordingClock.Reset();
                   _isPaused = false;
                   PauseButton.Content = "暂停";
                   PauseButton.IsEnabled = false;
@@ -786,7 +789,7 @@ jobs:
           if ($clockMethod.Success -and !$main.Contains('if (_isPaused) return;')) {
             $main = $main.Insert($clockMethod.Index + $clockMethod.Length, [Environment]::NewLine + '        if (_isPaused) return;')
           }
-          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
+          $main = [regex]::Replace($main, 'StatusText\.Text\s*=\s*\$"录制中\s*·\s*\{elapsed:hh\\\\:mm\\\\:ss\}";', 'elapsed = _activeRecordingClock.Elapsed;' + [Environment]::NewLine + '        StatusText.Text = "录制中 · 暂停 " + FormatShortcut(1);' + [Environment]::NewLine + '        TimerText.Text = $"{elapsed:hh\\:mm\\:ss}";' + [Environment]::NewLine + '        _regionMoveHandleWindow?.SetRecordingTime(TimerText.Text);')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
@@ -1231,7 +1234,7 @@ jobs:
 
               public void Close()
               {
-                  foreach (var handle in _handles.ToArray()) handle.Close();
+                  foreach (var handle in _handles) handle.Close();
                   _handles.Clear();
               }
           }
