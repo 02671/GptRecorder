@@ -51,7 +51,7 @@ jobs:
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                   Title="轻录屏" Height="52" MinHeight="52" MinWidth="0" SizeToContent="Width"
                   WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None"
-                  AllowsTransparency="True" Background="Transparent" ShowInTaskbar="True"
+                  AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="True" PreviewKeyDown="MainWindow_PreviewKeyDown"
                   Loaded="MainWindow_Loaded" SourceInitialized="MainWindow_SourceInitialized" Closing="MainWindow_Closing">
               <Window.Resources>
                   <Style x:Key="ActionButton" TargetType="{x:Type Button}">
@@ -134,7 +134,7 @@ jobs:
                           <RadioButton x:Name="FullScreenRadio" Style="{StaticResource ModeRadio}" Click="FullScreenRadio_Click" GroupName="CaptureMode" IsChecked="True" Content="全屏"/>
                           <RadioButton x:Name="RegionRadio" Style="{StaticResource ModeRadio}" Click="RegionRadio_Click" GroupName="CaptureMode" Content="区域"/>
                           <Border Width="1" Height="28" Background="#E1E7F0" Margin="2,0,8,0"/>
-                          <Button x:Name="RecordButton" Style="{StaticResource ActionButton}" MinWidth="96" Margin="0,0,6,0" Content="●  开始录制" Click="RecordButton_Click" Background="#3569E8" Foreground="#FFFFFF" BorderBrush="#3569E8"/>
+                          <Button x:Name="RecordButton" Style="{StaticResource ActionButton}" MinWidth="96" Margin="0,0,6,0" Content="开始录制" Click="RecordButton_Click"/>
                           <Button Style="{StaticResource ActionButton}" Content="打开目录" Click="OpenFolder_Click"/>
                           <Button x:Name="OptionsButton" Style="{StaticResource ActionButton}" Content="选项" Click="OptionsButton_Click"/>
                           <Border Background="#F0FDF4" BorderBrush="#D4F4DF" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,10,0" VerticalAlignment="Center">
@@ -144,7 +144,7 @@ jobs:
                               </StackPanel>
                           </Border>
                           <TextBlock x:Name="TimerText" Text="00:00:00" FontSize="14" FontFamily="Consolas" Foreground="#27364B" VerticalAlignment="Center" MinWidth="76" Margin="0,0,10,0"/>
-                          <Button x:Name="CloseButton" Style="{StaticResource ActionButton}" Content="关闭" MinWidth="54" Margin="0" Click="CloseButton_Click" Background="#FFF1F2" Foreground="#B42332" BorderBrush="#F4C7CD"/>
+                          <Button x:Name="CloseButton" Style="{StaticResource ActionButton}" Content="关闭" MinWidth="54" Margin="0" Click="CloseButton_Click"/>
                       </StackPanel>
                   </Border>
                   <Grid x:Name="OptionsPanel" Grid.Row="1" Visibility="Collapsed" Margin="0,8,0,0">
@@ -156,10 +156,12 @@ jobs:
                                   <CheckBox x:Name="MicrophoneCheck" Content="麦克风" IsChecked="True" FontSize="12" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,18,0"/>
                                   <Border Width="1" Height="22" Background="#E1E7F0" Margin="0,0,15,0"/>
                                   <TextBlock Text="帧率" FontSize="12" Foreground="#64748B" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                  <ComboBox x:Name="FpsCombo" Width="96" Height="29" VerticalContentAlignment="Center" SelectedIndex="0" FontSize="12" Padding="6,2">
+                                  <ComboBox x:Name="FpsCombo" Width="96" Height="29" VerticalContentAlignment="Center" SelectedIndex="1" FontSize="12" Padding="6,2">
+                                      <ComboBoxItem Content="15 FPS"/>
                                       <ComboBoxItem Content="30 FPS"/>
                                       <ComboBoxItem Content="60 FPS"/>
                                   </ComboBox>
+                                  <CheckBox x:Name="TopmostCheck" Content="窗口置顶" IsChecked="True" Checked="TopmostCheck_Changed" Unchecked="TopmostCheck_Changed" FontSize="12" Foreground="#334155" VerticalAlignment="Center" Margin="14,0,0,0"/>
                               </StackPanel>
                               <Grid Margin="0,10,0,0">
                                   <Grid.ColumnDefinitions>
@@ -171,7 +173,7 @@ jobs:
                                   <TextBox x:Name="OutputPathText" Grid.Column="1" Height="30" VerticalContentAlignment="Center" Padding="8,3" BorderBrush="#D8E1ED" Background="#FBFCFE" FontSize="12" Margin="0,0,8,0"/>
                                   <Button Grid.Column="2" Style="{StaticResource ActionButton}" Content="选择文件夹" Click="BrowseFolder_Click" Margin="0" Height="30" VerticalAlignment="Center"/>
                               </Grid>
-                              <TextBlock x:Name="LatestFileText" Text="最近录制：暂无文件" FontSize="11" Foreground="#718096" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
+                              <TextBlock x:Name="LatestFileText" Text="最近录制：暂无文件" Visibility="Collapsed" FontSize="11" Foreground="#718096" Margin="0,8,0,0" TextTrimming="CharacterEllipsis"/>
                           </StackPanel>
                       </Border>
                   </Grid>
@@ -181,6 +183,9 @@ jobs:
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
+          $main = $main.Replace('FpsCombo.SelectedIndex = _settings.FrameRate == 60 ? 1 : 0;', 'FpsCombo.SelectedIndex = _settings.FrameRate == 15 ? 0 : _settings.FrameRate == 60 ? 2 : 1;')
+          $main = $main.Replace('Framerate = FpsCombo.SelectedIndex == 1 ? 60 : 30,', 'Framerate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30,')
+          $main = $main.Replace('_settings.FrameRate = FpsCombo.SelectedIndex == 1 ? 60 : 30;', '_settings.FrameRate = FpsCombo.SelectedIndex == 0 ? 15 : FpsCombo.SelectedIndex == 2 ? 60 : 30;')
           if (!$main.Contains('private DrawingRectangle? _selectedRegionForRecording;')) {
             $classForState = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
             if (!$classForState.Success) { throw 'Could not find MainWindow class for region state.' }
@@ -231,7 +236,9 @@ jobs:
                       }
                       _selectedRegionForRecording = selector.SelectedArea;
                       ShowRegionOutline(selector.SelectedArea.Value);
-                      SetStatus("已选择区域，可拖动外侧“移动区域”把手调整位置", StatusTone.Ready);
+                      Activate();
+                      System.Windows.Input.Keyboard.Focus(RegionRadio);
+                      SetStatus("已选择区域，可拖动右上角圆点调整位置，Esc 取消区域", StatusTone.Ready);
                   }
                   finally
                   {
@@ -304,6 +311,31 @@ jobs:
             $main = $main.Insert($classMatch.Index + $classMatch.Length, "`r`n    private RegionOutlineWindow? _regionOutlineWindow;")
           }
           $helperMethods = @'
+              private void TopmostCheck_Changed(object sender, RoutedEventArgs e)
+              {
+                  Topmost = TopmostCheck.IsChecked == true;
+              }
+
+              private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+              {
+                  if (e.Key != System.Windows.Input.Key.Escape ||
+                      !_selectedRegionForRecording.HasValue ||
+                      _isRecording || _isStarting || _isStopping)
+                      return;
+
+                  _selectedRegionForRecording = null;
+                  CloseRegionOutline();
+                  FullScreenRadio.IsChecked = true;
+                  SetStatus("已取消区域选择", StatusTone.Ready);
+                  e.Handled = true;
+              }
+
+              private void ResetRecordingClock()
+              {
+                  _clock.Stop();
+                  TimerText.Text = "00:00:00";
+              }
+
               private void FullScreenRadio_Click(object sender, RoutedEventArgs e)
               {
                   if (!IsLoaded || _isStarting || _isRecording || _isStopping) return;
@@ -381,6 +413,19 @@ jobs:
             $main = $main.Insert($startMethod.Index, $helperMethods)
           }
           $main = [regex]::Replace($main, '(?m)^        SaveSettings\(\);', '        CloseRegionOutline();' + [Environment]::NewLine + '        SaveSettings();')
+          $recordMatch = [regex]::Match($main, '(?<object>[A-Za-z_]\w*)\.Record\s*\(')
+          if (!$recordMatch.Success) { throw 'Could not find recorder Record(...) call for timer reset hooks.' }
+          $recordObject = $recordMatch.Groups['object'].Value
+          $lineStart = $main.LastIndexOf("`n", $recordMatch.Index)
+          if ($lineStart -lt 0) { $lineStart = 0 } else { $lineStart++ }
+          $indent = [regex]::Match($main.Substring($lineStart, $recordMatch.Index - $lineStart), '^\s*').Value
+          $recordHooks = @"
+          ${indent}$recordObject.OnRecordingComplete += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(ResetRecordingClock));
+          ${indent}$recordObject.OnRecordingFailed += (_, __) => System.Windows.Application.Current.Dispatcher.BeginInvoke(new System.Action(ResetRecordingClock));
+          "@
+          if (!$main.Contains('new System.Action(ResetRecordingClock)')) {
+            $main = $main.Insert($lineStart, $recordHooks + "`r`n")
+          }
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
           $overlayPath = Join-Path $root 'RegionOutlineWindow.cs'
           $overlayCode = @'
@@ -496,10 +541,9 @@ jobs:
               private const int GwlExStyle = -20;
               private const int WsExToolWindow = 0x00000080;
               private const int WsExNoActivate = 0x08000000;
-              private const double HandleWidth = 92.0;
-              private const double HandleHeight = 25.0;
-              private const double AnchorX = 16.0;
-              private readonly Action<DrawingRectangle> _moveCallback;
+              private const double HandleWidth = 24.0;
+              private const double HandleHeight = 24.0;
+                        private readonly Action<DrawingRectangle> _moveCallback;
               private DrawingRectangle _area;
               private DrawingRectangle _dragStartArea;
               private double _dragStartLeft;
@@ -532,18 +576,18 @@ jobs:
           
                   var handle = new Border
                   {
+                      Width = HandleWidth,
+                      Height = HandleHeight,
                       Background = new SolidColorBrush(Color.FromRgb(43, 91, 210)),
                       BorderBrush = Brushes.White,
                       BorderThickness = new Thickness(1),
-                      CornerRadius = new CornerRadius(6),
-                      Padding = new Thickness(8, 3, 8, 3),
+                      CornerRadius = new CornerRadius(12),
                       Cursor = Cursors.SizeAll,
-                      Child = new TextBlock
+                      Child = new System.Windows.Shapes.Ellipse
                       {
-                          Text = "↕  移动区域",
-                          Foreground = Brushes.White,
-                          FontSize = 11,
-                          FontWeight = FontWeights.SemiBold,
+                          Width = 8,
+                          Height = 8,
+                          Fill = Brushes.White,
                           HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                           VerticalAlignment = System.Windows.VerticalAlignment.Center
                       }
@@ -572,7 +616,7 @@ jobs:
           
               private void PositionHandle()
               {
-                  Left = (_area.X + AnchorX) / _scaleX;
+                  Left = (_area.X + Math.Max(0, _area.Width - HandleWidth - 6.0)) / _scaleX;
                   Top = (_area.Y - HandleHeight - 3.0) / _scaleY;
               }
           
@@ -639,7 +683,7 @@ jobs:
           Set-Content -LiteralPath $regionPath -Value $region -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
-          $main = $main.Replace('using System.Windows;', "using System.Windows;`nusing MessageBox = System.Windows.MessageBox;")
+          $main = $main.Replace('using System.Windows;', "using System.Windows;`nusing MessageBox = System.Windows.MessageBox;`nusing KeyEventArgs = System.Windows.Input.KeyEventArgs;")
           $audioChecks = '(?s)\s*if \(recordSystemAudio && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.OutputDevices\).*?\n            \}\s*if \(recordMicrophone && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.InputDevices\).*?\n            \}'
           $main = [regex]::Replace($main, $audioChecks, '')
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
