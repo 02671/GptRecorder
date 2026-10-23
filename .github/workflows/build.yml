@@ -1393,11 +1393,13 @@ jobs:
                   var isRight = _edge == RegionResizeEdge.TopRight || _edge == RegionResizeEdge.Right || _edge == RegionResizeEdge.BottomRight;
                   var isTop = _edge == RegionResizeEdge.TopLeft || _edge == RegionResizeEdge.Top || _edge == RegionResizeEdge.TopRight;
                   var isBottom = _edge == RegionResizeEdge.BottomLeft || _edge == RegionResizeEdge.Bottom || _edge == RegionResizeEdge.BottomRight;
-                  var centerX = isLeft ? _area.Left - halfWidthPixels - 2.0 :
-                                isRight ? _area.Right + halfWidthPixels + 2.0 :
+                  // Center each resize handle directly on its corresponding border line.
+                  // This lets edge handles remain half-visible when the selection touches a screen edge.
+                  var centerX = isLeft ? (double)_area.Left :
+                                isRight ? (double)_area.Right :
                                 _area.Left + _area.Width / 2.0;
-                  var centerY = isTop ? _area.Top - halfHeightPixels - 2.0 :
-                                isBottom ? _area.Bottom + halfHeightPixels + 2.0 :
+                  var centerY = isTop ? (double)_area.Top :
+                                isBottom ? (double)_area.Bottom :
                                 _area.Top + _area.Height / 2.0;
                   Left = (centerX - halfWidthPixels) / _scaleX;
                   Top = (centerY - halfHeightPixels) / _scaleY;
