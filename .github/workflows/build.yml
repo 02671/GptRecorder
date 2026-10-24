@@ -1535,7 +1535,6 @@ jobs:
             $main = $main.Replace($refreshTrayAnchor, $cancelState + $refreshTrayAnchor)
           }
           # Add the requested global pause/cancel shortcuts and tray pause item.
-          $main = Get-Content -LiteralPath $mainPath -Raw
           $main = $main.Replace('SetStatus("录制已取消，视频未保存", StatusTone.Ready);', 'SetStatus("录制已取消", StatusTone.Ready);')
           $main = $main.Replace('LatestFileText.Text = "最近录制：已取消（未保存）";', 'LatestFileText.Text = "录制已取消";')
           $main = $main.Replace('LatestFileText.Text = "最近录制：录制已取消";', 'LatestFileText.Text = "录制已取消";')
