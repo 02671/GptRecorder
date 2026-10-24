@@ -199,6 +199,14 @@ jobs:
           </Window>
           '@
           $xaml = [regex]::Replace($xaml, '(?s)\s*<TextBlock Text="全局快捷键".*?<TextBlock x:Name="HotkeyHintText".*?</StackPanel>', '')
+          $xaml = $xaml.Replace('Content="打开目录" Click="OpenFolder_Click"', 'Content="目录" Click="OpenFolder_Click"')
+          $xaml = $xaml.Replace('Content="选项" Click="OptionsButton_Click"', 'Content="设置" Click="OptionsButton_Click"')
+          $pauseButton = '<Button x:Name="PauseButton" Style="{StaticResource ActionButton}" MinWidth="62" Margin="0,0,6,0" Content="暂停" Click="PauseButton_Click" IsEnabled="False"/>'
+          if (!$xaml.Contains($pauseButton)) { throw 'Could not find PauseButton to add the cancel button.' }
+          $cancelButton = '<Button x:Name="CancelButton" Style="{StaticResource ActionButton}" MinWidth="62" Margin="0,0,6,0" Content="取消" Click="CancelButton_Click" IsEnabled="False"/>'
+          if (!$xaml.Contains('x:Name="CancelButton"')) {
+            $xaml = $xaml.Replace($pauseButton, $pauseButton + [Environment]::NewLine + '                          ' + $cancelButton)
+          }
           Set-Content -LiteralPath $xamlPath -Value $xaml -Encoding utf8
           $mainPath = Join-Path $root 'MainWindow.xaml.cs'
           $main = Get-Content -LiteralPath $mainPath -Raw
@@ -1481,6 +1489,215 @@ jobs:
           $main = $main.Replace('using System.Windows;', "using System.Windows;`nusing MessageBox = System.Windows.MessageBox;`nusing KeyEventArgs = System.Windows.Input.KeyEventArgs;")
           $audioChecks = '(?s)\s*if \(recordSystemAudio && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.OutputDevices\).*?\n            \}\s*if \(recordMicrophone && Recorder\.GetSystemAudioDevices\(AudioDeviceSource\.InputDevices\).*?\n            \}'
           $main = [regex]::Replace($main, $audioChecks, '')
+
+          $main = $main.Replace('OptionsButton.Content = expanded ? "收起" : "选项";', 'OptionsButton.Content = expanded ? "收起" : "设置";')
+
+          if (!$main.Contains('private void CancelButton_Click(object sender, RoutedEventArgs e)')) {
+            $recordHandler = [regex]::Match($main, '(?s)private void RecordButton_Click\(object sender, RoutedEventArgs e\)\s*\{\s*ToggleRecording\(\);\s*\}')
+            if (!$recordHandler.Success) { throw 'Could not find RecordButton_Click to add CancelButton_Click.' }
+            if (!$main.Contains('private void CancelRegionRecordingWithoutSaving()')) { throw 'Could not find the shared cancel-without-saving handler.' }
+            $cancelHandler = @'
+              private void CancelButton_Click(object sender, RoutedEventArgs e)
+              {
+                  if (!_isRecording || _isStarting || _isStopping) return;
+                  CancelRegionRecordingWithoutSaving();
+              }
+          '@
+            $main = $main.Insert($recordHandler.Index + $recordHandler.Length, [Environment]::NewLine + $cancelHandler)
+          }
+
+          if (!$main.Contains('private Forms.ToolStripMenuItem? _trayCancelItem;')) {
+            $trayRecordField = 'private Forms.ToolStripMenuItem? _trayRecordItem;'
+            if (!$main.Contains($trayRecordField)) { throw 'Could not find the existing tray record-menu field.' }
+            $main = $main.Replace($trayRecordField, $trayRecordField + [Environment]::NewLine + '    private Forms.ToolStripMenuItem? _trayCancelItem;')
+          }
+          if (!$main.Contains('_trayCancelItem = new Forms.ToolStripMenuItem("取消录制"')) {
+            $trayRecordAdd = '        menu.Items.Add(_trayRecordItem);'
+            if (!$main.Contains($trayRecordAdd)) { throw 'Could not find the tray record-menu insertion point.' }
+            $trayCancelAdd = '        _trayCancelItem = new Forms.ToolStripMenuItem("取消录制", null, (_, _) => Dispatcher.BeginInvoke(new Action(CancelRegionRecordingWithoutSaving)));' + [Environment]::NewLine + '        menu.Items.Add(_trayCancelItem);'
+            $main = $main.Replace($trayRecordAdd, $trayRecordAdd + [Environment]::NewLine + $trayCancelAdd)
+          }
+
+          $openMenuPattern = '(?m)^(?<line>[ \t]*menu\.Items\.Add\("[^"\r\n]*",\s*null,\s*\(_, _\)\s*=>\s*Dispatcher\.BeginInvoke\(new Action\(RestoreMainWindow\)\)\);)[ \t]*\r?
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish self-contained Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish "$env:PROJECT_FILE" --configuration Release --runtime win-x64 --self-contained true -p:Platform=x64 -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed for full version' }
+          Compress-Archive -Path '.\artifacts\publish\*' -DestinationPath '.\artifacts\录屏-Windows-x64.zip' -Force
+          $fullBytes = (Get-Item '.\artifacts\录屏-Windows-x64.zip').Length
+          Write-Host ("Full standalone package: {0:N1} MB" -f ($fullBytes / 1MB))
+      - name: Publish lightweight framework-dependent Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish "$env:PROJECT_FILE" --configuration Release --runtime win-x64 --self-contained false -p:Platform=x64 -p:UseAppHost=true -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish-lite
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed for lightweight version' }
+          Compress-Archive -Path '.\artifacts\publish-lite\*' -DestinationPath '.\artifacts\录屏-Windows-x64-轻量版.zip' -Force
+          $liteBytes = (Get-Item '.\artifacts\录屏-Windows-x64-轻量版.zip').Length
+          Write-Host ("Lightweight framework-dependent package: {0:N1} MB" -f ($liteBytes / 1MB))
+      - name: Upload full standalone build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingRecorder-Windows-x64
+          path: artifacts/录屏-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload lightweight build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingRecorder-Windows-x64-Lite
+          path: artifacts/录屏-Windows-x64-轻量版.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub Release for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 录屏 ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/录屏-Windows-x64.zip
+            artifacts/录屏-Windows-x64-轻量版.zip
+
+
+      - name: Keep only the latest successful build
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $repo = $env:REPOSITORY
+          $currentRunId = [long]$env:CURRENT_RUN_ID
+          $runsUrl = "https://api.github.com/repos/$repo/actions/workflows/build.yml/runs?per_page=100"
+          $runResponse = Invoke-RestMethod -Method Get -Uri $runsUrl -Headers $headers
+          # Preserve build #52 (run id 39914813734) and its artifacts as requested.
+          $preservedRunId = [long]39914813734
+          $oldRuns = @($runResponse.workflow_runs | Where-Object { [long]$_.id -ne $currentRunId -and [long]$_.id -ne $preservedRunId })
+          $oldRunIds = @($oldRuns | ForEach-Object { [string]$_.id })
+
+          $artifactUrl = "https://api.github.com/repos/$repo/actions/artifacts?per_page=100"
+          $artifactResponse = Invoke-RestMethod -Method Get -Uri $artifactUrl -Headers $headers
+          foreach ($artifact in $artifactResponse.artifacts) {
+            if ($null -ne $artifact.workflow_run -and $oldRunIds -contains [string]$artifact.workflow_run.id -and [long]$artifact.workflow_run.id -ne $preservedRunId) {
+              Write-Host "Deleting old build package: $($artifact.name) (artifact $($artifact.id))"
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/artifacts/$($artifact.id)" -Headers $headers
+            }
+          }
+
+          foreach ($run in $oldRuns) {
+            Write-Host "Deleting old build record: $($run.id) - $($run.display_title)"
+            Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/runs/$($run.id)" -Headers $headers
+          }
+          Write-Host "Kept the latest successful workflow run $currentRunId and preserved build #52 ($preservedRunId) with its artifacts.";
+
+          $openMenuMatch = [regex]::Match($main, $openMenuPattern)
+          if (!$openMenuMatch.Success) { throw 'Could not find the tray menu item that opens QingRecorder.' }
+          $openMenuLine = $openMenuMatch.Groups['line'].Value
+          $main = $main.Remove($openMenuMatch.Index, $openMenuMatch.Length)
+          $exitMenuPattern = '(?m)^(?<line>[ \t]*menu\.Items\.Add\("[^"\r\n]*",\s*null,\s*\(_, _\)\s*=>\s*Dispatcher\.BeginInvoke\(new Action\(ExitFromTray\)\)\);)[ \t]*\r?
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish self-contained Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish "$env:PROJECT_FILE" --configuration Release --runtime win-x64 --self-contained true -p:Platform=x64 -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed for full version' }
+          Compress-Archive -Path '.\artifacts\publish\*' -DestinationPath '.\artifacts\录屏-Windows-x64.zip' -Force
+          $fullBytes = (Get-Item '.\artifacts\录屏-Windows-x64.zip').Length
+          Write-Host ("Full standalone package: {0:N1} MB" -f ($fullBytes / 1MB))
+      - name: Publish lightweight framework-dependent Windows x64 app
+        shell: pwsh
+        run: |
+          dotnet publish "$env:PROJECT_FILE" --configuration Release --runtime win-x64 --self-contained false -p:Platform=x64 -p:UseAppHost=true -p:PublishSingleFile=false -p:PublishTrimmed=false --output .\artifacts\publish-lite
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed for lightweight version' }
+          Compress-Archive -Path '.\artifacts\publish-lite\*' -DestinationPath '.\artifacts\录屏-Windows-x64-轻量版.zip' -Force
+          $liteBytes = (Get-Item '.\artifacts\录屏-Windows-x64-轻量版.zip').Length
+          Write-Host ("Lightweight framework-dependent package: {0:N1} MB" -f ($liteBytes / 1MB))
+      - name: Upload full standalone build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingRecorder-Windows-x64
+          path: artifacts/录屏-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload lightweight build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingRecorder-Windows-x64-Lite
+          path: artifacts/录屏-Windows-x64-轻量版.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub Release for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 录屏 ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/录屏-Windows-x64.zip
+            artifacts/录屏-Windows-x64-轻量版.zip
+
+
+      - name: Keep only the latest successful build
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $repo = $env:REPOSITORY
+          $currentRunId = [long]$env:CURRENT_RUN_ID
+          $runsUrl = "https://api.github.com/repos/$repo/actions/workflows/build.yml/runs?per_page=100"
+          $runResponse = Invoke-RestMethod -Method Get -Uri $runsUrl -Headers $headers
+          # Preserve build #52 (run id 39914813734) and its artifacts as requested.
+          $preservedRunId = [long]39914813734
+          $oldRuns = @($runResponse.workflow_runs | Where-Object { [long]$_.id -ne $currentRunId -and [long]$_.id -ne $preservedRunId })
+          $oldRunIds = @($oldRuns | ForEach-Object { [string]$_.id })
+
+          $artifactUrl = "https://api.github.com/repos/$repo/actions/artifacts?per_page=100"
+          $artifactResponse = Invoke-RestMethod -Method Get -Uri $artifactUrl -Headers $headers
+          foreach ($artifact in $artifactResponse.artifacts) {
+            if ($null -ne $artifact.workflow_run -and $oldRunIds -contains [string]$artifact.workflow_run.id -and [long]$artifact.workflow_run.id -ne $preservedRunId) {
+              Write-Host "Deleting old build package: $($artifact.name) (artifact $($artifact.id))"
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/artifacts/$($artifact.id)" -Headers $headers
+            }
+          }
+
+          foreach ($run in $oldRuns) {
+            Write-Host "Deleting old build record: $($run.id) - $($run.display_title)"
+            Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/runs/$($run.id)" -Headers $headers
+          }
+          Write-Host "Kept the latest successful workflow run $currentRunId and preserved build #52 ($preservedRunId) with its artifacts.";
+
+          $exitMenuMatch = [regex]::Match($main, $exitMenuPattern)
+          if (!$exitMenuMatch.Success) { throw 'Could not find the tray menu exit item to place Open QingRecorder above it.' }
+          $main = $main.Insert($exitMenuMatch.Index, $openMenuLine + [Environment]::NewLine)
+
+          if (!$main.Contains('CancelButton.IsEnabled = _isRecording && !_isStarting && !_isStopping;')) {
+            $refreshTrayAnchor = '        if (_trayRecordItem is null) return;'
+            if (!$main.Contains($refreshTrayAnchor)) { throw 'Could not find RefreshTrayMenu to update cancel-button states.' }
+            $cancelState = '        CancelButton.IsEnabled = _isRecording && !_isStarting && !_isStopping;' + [Environment]::NewLine + '        if (_trayCancelItem is not null) _trayCancelItem.Enabled = _isRecording && !_isStarting && !_isStopping;' + [Environment]::NewLine
+            $main = $main.Replace($refreshTrayAnchor, $cancelState + $refreshTrayAnchor)
+          }
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
@@ -1544,13 +1761,15 @@ jobs:
           $currentRunId = [long]$env:CURRENT_RUN_ID
           $runsUrl = "https://api.github.com/repos/$repo/actions/workflows/build.yml/runs?per_page=100"
           $runResponse = Invoke-RestMethod -Method Get -Uri $runsUrl -Headers $headers
-          $oldRuns = @($runResponse.workflow_runs | Where-Object { [long]$_.id -ne $currentRunId })
+          # Preserve build #52 (run id 39914813734) and its artifacts as requested.
+          $preservedRunId = [long]39914813734
+          $oldRuns = @($runResponse.workflow_runs | Where-Object { [long]$_.id -ne $currentRunId -and [long]$_.id -ne $preservedRunId })
           $oldRunIds = @($oldRuns | ForEach-Object { [string]$_.id })
 
           $artifactUrl = "https://api.github.com/repos/$repo/actions/artifacts?per_page=100"
           $artifactResponse = Invoke-RestMethod -Method Get -Uri $artifactUrl -Headers $headers
           foreach ($artifact in $artifactResponse.artifacts) {
-            if ($null -ne $artifact.workflow_run -and $oldRunIds -contains [string]$artifact.workflow_run.id) {
+            if ($null -ne $artifact.workflow_run -and $oldRunIds -contains [string]$artifact.workflow_run.id -and [long]$artifact.workflow_run.id -ne $preservedRunId) {
               Write-Host "Deleting old build package: $($artifact.name) (artifact $($artifact.id))"
               Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/artifacts/$($artifact.id)" -Headers $headers
             }
@@ -1560,4 +1779,4 @@ jobs:
             Write-Host "Deleting old build record: $($run.id) - $($run.display_title)"
             Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/runs/$($run.id)" -Headers $headers
           }
-          Write-Host "Kept the latest successful workflow run $currentRunId and its artifact.";
+          Write-Host "Kept the latest successful workflow run $currentRunId and preserved build #52 ($preservedRunId) with its artifacts.";
