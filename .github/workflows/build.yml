@@ -1511,10 +1511,10 @@ jobs:
             if (!$main.Contains($trayRecordField)) { throw 'Could not find the existing tray record-menu field.' }
             $main = $main.Replace($trayRecordField, $trayRecordField + [Environment]::NewLine + '    private Forms.ToolStripMenuItem? _trayCancelItem;')
           }
-          if (!$main.Contains('_trayCancelItem = new Forms.ToolStripMenuItem("取消录制"')) {
+          if (!$main.Contains('_trayCancelItem = new Forms.ToolStripMenuItem("取消录制 (Ctrl+Alt+Q)"')) {
             $trayRecordAdd = '        menu.Items.Add(_trayRecordItem);'
             if (!$main.Contains($trayRecordAdd)) { throw 'Could not find the tray record-menu insertion point.' }
-            $trayCancelAdd = '        _trayCancelItem = new Forms.ToolStripMenuItem("取消录制", null, (_, _) => Dispatcher.BeginInvoke(new Action(CancelRegionRecordingWithoutSaving)));' + [Environment]::NewLine + '        menu.Items.Add(_trayCancelItem);'
+            $trayCancelAdd = '        _trayCancelItem = new Forms.ToolStripMenuItem("取消录制 (Ctrl+Alt+Q)", null, (_, _) => Dispatcher.BeginInvoke(new Action(CancelRegionRecordingWithoutSaving)));' + [Environment]::NewLine + '        menu.Items.Add(_trayCancelItem);'
             $main = $main.Replace($trayRecordAdd, $trayRecordAdd + [Environment]::NewLine + $trayCancelAdd)
           }
 
@@ -1545,15 +1545,15 @@ jobs:
             $main = $main.Replace($fieldAnchor, $fieldAnchor + [Environment]::NewLine + '    private Forms.ToolStripMenuItem? _trayPauseItem;')
           }
           if (!$main.Contains('_trayPauseItem = new Forms.ToolStripMenuItem("暂停录制"')) {
-            $pauseMenu = '        _trayPauseItem = new Forms.ToolStripMenuItem("暂停录制", null, (_, _) => Dispatcher.BeginInvoke(new Action(() => PauseButton_Click(this, new RoutedEventArgs()))));' + [Environment]::NewLine + '        menu.Items.Add(_trayPauseItem);' + [Environment]::NewLine
+            $pauseMenu = '        _trayPauseItem = new Forms.ToolStripMenuItem("暂停录制 (Ctrl+Alt+Z)", null, (_, _) => Dispatcher.BeginInvoke(new Action(() => PauseButton_Click(this, new RoutedEventArgs()))));' + [Environment]::NewLine + '        menu.Items.Add(_trayPauseItem);' + [Environment]::NewLine
             $cancelMenuLine = '        menu.Items.Add(_trayCancelItem);'
             if (!$main.Contains($cancelMenuLine)) { throw 'Could not find the tray cancel item to place pause above it.' }
             $main = $main.Replace($cancelMenuLine, $pauseMenu + $cancelMenuLine)
           }
-          if (!$main.Contains('if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制" : "暂停录制";')) {
+          if (!$main.Contains('if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制 (Ctrl+Alt+Z)" : "暂停录制 (Ctrl+Alt+Z)";')) {
             $refreshAnchor = '        if (_trayRecordItem is null) return;'
             if (!$main.Contains($refreshAnchor)) { throw 'Could not find RefreshTrayMenu for pause state updates.' }
-            $pauseState = '        if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制" : "暂停录制"; _trayPauseItem.Enabled = _isRecording && !_isStarting && !_isStopping; }' + [Environment]::NewLine
+            $pauseState = '        if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制 (Ctrl+Alt+Z)" : "暂停录制 (Ctrl+Alt+Z)"; _trayPauseItem.Enabled = _isRecording && !_isStarting && !_isStopping; }' + [Environment]::NewLine
             $main = $main.Replace($refreshAnchor, $pauseState + $refreshAnchor)
           }
 
