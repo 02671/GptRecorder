@@ -1534,7 +1534,101 @@ jobs:
             $cancelState = '        CancelButton.IsEnabled = _isRecording && !_isStarting && !_isStopping;' + [Environment]::NewLine + '        if (_trayCancelItem is not null) _trayCancelItem.Enabled = _isRecording && !_isStarting && !_isStopping;' + [Environment]::NewLine
             $main = $main.Replace($refreshTrayAnchor, $cancelState + $refreshTrayAnchor)
           }
+          # Add the requested global pause/cancel shortcuts and tray pause item.
+          $main = Get-Content -LiteralPath $mainPath -Raw
+          $main = $main.Replace('SetStatus("录制已取消，视频未保存", StatusTone.Ready);', 'SetStatus("录制已取消", StatusTone.Ready);')
+          $main = $main.Replace('LatestFileText.Text = "最近录制：已取消（未保存）";', 'LatestFileText.Text = "录制已取消";')
+          $main = $main.Replace('LatestFileText.Text = "最近录制：录制已取消";', 'LatestFileText.Text = "录制已取消";')
+
+          if (!$main.Contains('private Forms.ToolStripMenuItem? _trayPauseItem;')) {
+            $fieldAnchor = 'private Forms.ToolStripMenuItem? _trayCancelItem;'
+            if (!$main.Contains($fieldAnchor)) { throw 'Could not find the tray cancel-menu field for the pause item.' }
+            $main = $main.Replace($fieldAnchor, $fieldAnchor + [Environment]::NewLine + '    private Forms.ToolStripMenuItem? _trayPauseItem;')
+          }
+          if (!$main.Contains('_trayPauseItem = new Forms.ToolStripMenuItem("暂停录制"')) {
+            $pauseMenu = '        _trayPauseItem = new Forms.ToolStripMenuItem("暂停录制", null, (_, _) => Dispatcher.BeginInvoke(new Action(() => PauseButton_Click(this, new RoutedEventArgs()))));' + [Environment]::NewLine + '        menu.Items.Add(_trayPauseItem);' + [Environment]::NewLine
+            $cancelMenuLine = '        menu.Items.Add(_trayCancelItem);'
+            if (!$main.Contains($cancelMenuLine)) { throw 'Could not find the tray cancel item to place pause above it.' }
+            $main = $main.Replace($cancelMenuLine, $pauseMenu + $cancelMenuLine)
+          }
+          if (!$main.Contains('if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制" : "暂停录制";')) {
+            $refreshAnchor = '        if (_trayRecordItem is null) return;'
+            if (!$main.Contains($refreshAnchor)) { throw 'Could not find RefreshTrayMenu for pause state updates.' }
+            $pauseState = '        if (_trayPauseItem is not null) { _trayPauseItem.Text = _isPaused ? "继续录制" : "暂停录制"; _trayPauseItem.Enabled = _isRecording && !_isStarting && !_isStopping; }' + [Environment]::NewLine
+            $main = $main.Replace($refreshAnchor, $pauseState + $refreshAnchor)
+          }
+
+          # Remove the old Ctrl+Alt+O wording and unregister the legacy hotkey ID (2) after startup.
+          $main = $main.Replace('打开保存目录 (Ctrl+Alt+O)', '打开保存目录')
+          $main = $main.Replace('打开目录 (Ctrl+Alt+O)', '打开目录')
+          if (!$main.Contains('private System.Windows.Interop.HwndSource? _qingHotkeySource;')) {
+            $classMatch = [regex]::Match($main, '(?s)\bclass\s+MainWindow\b[^\{]*\{')
+            if (!$classMatch.Success) { throw 'Could not find MainWindow to add the new global shortcuts.' }
+            $fields = @'
+              private System.Windows.Interop.HwndSource? _qingHotkeySource;
+              private const int QingPauseHotkeyId = 0x7101;
+              private const int QingCancelHotkeyId = 0x7102;
+              [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "RegisterHotKey", SetLastError = true)] private static extern bool QingRegisterHotKey(System.IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+              [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "UnregisterHotKey", SetLastError = true)] private static extern bool QingUnregisterHotKey(System.IntPtr hWnd, int id);
+          '@
+            $main = $main.Insert($classMatch.Index + $classMatch.Length, [Environment]::NewLine + $fields)
+          }
+          if (!$main.Contains('private void RegisterQingGlobalHotkeys()')) {
+            $hotkeyMethods = @'
+              private void RegisterQingGlobalHotkeys()
+              {
+                  var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                  if (hwnd == System.IntPtr.Zero) return;
+                  _qingHotkeySource = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
+                  _qingHotkeySource?.AddHook(QingHotkeyWindowProc);
+                  // The original app used hotkey ID 2 for opening the output folder (Ctrl+Alt+O).
+                  QingUnregisterHotKey(hwnd, 2);
+                  QingRegisterHotKey(hwnd, QingPauseHotkeyId, 0x0001 | 0x0002, 0x5A); // Ctrl+Alt+Z
+                  QingRegisterHotKey(hwnd, QingCancelHotkeyId, 0x0001 | 0x0002, 0x51); // Ctrl+Alt+Q
+              }
+
+              private void UnregisterQingGlobalHotkeys()
+              {
+                  var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                  if (hwnd != System.IntPtr.Zero)
+                  {
+                      QingUnregisterHotKey(hwnd, QingPauseHotkeyId);
+                      QingUnregisterHotKey(hwnd, QingCancelHotkeyId);
+                  }
+                  _qingHotkeySource?.RemoveHook(QingHotkeyWindowProc);
+                  _qingHotkeySource = null;
+              }
+
+              private System.IntPtr QingHotkeyWindowProc(System.IntPtr hwnd, int msg, System.IntPtr wParam, System.IntPtr lParam, ref bool handled)
+              {
+                  if (msg != 0x0312) return System.IntPtr.Zero;
+                  var id = wParam.ToInt32();
+                  if (id == QingPauseHotkeyId)
+                  {
+                      PauseButton_Click(this, new RoutedEventArgs());
+                      RefreshTrayMenu();
+                      handled = true;
+                  }
+                  else if (id == QingCancelHotkeyId)
+                  {
+                      CancelRegionRecordingWithoutSaving();
+                      handled = true;
+                  }
+                  return System.IntPtr.Zero;
+              }
+
+          '@
+            $startMethod = [regex]::Match($main, '(?m)^\s*private async Task StartRecordingAsync\s*\(')
+            if (!$startMethod.Success) { throw 'Could not find StartRecordingAsync to insert the new global shortcut handlers.' }
+            $main = $main.Insert($startMethod.Index, $hotkeyMethods)
+          }
+          if (!$main.Contains('SourceInitialized += (_, _) => RegisterQingGlobalHotkeys();')) {
+            $initAnchor = 'InitializeComponent();'
+            if (!$main.Contains($initAnchor)) { throw 'Could not find InitializeComponent to initialize global shortcuts.' }
+            $main = $main.Replace($initAnchor, $initAnchor + [Environment]::NewLine + '        SourceInitialized += (_, _) => RegisterQingGlobalHotkeys();' + [Environment]::NewLine + '        Closing += (_, _) => UnregisterQingGlobalHotkeys();')
+          }
           Set-Content -LiteralPath $mainPath -Value $main -Encoding utf8
+
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
